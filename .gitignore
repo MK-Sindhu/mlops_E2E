@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual Environment
+venv/
+.env
+
+# Data (tracked by DVC)
+data/raw/*.csv
+data/processed/*.csv
+data/processed/*.joblib
+
+# Models (tracked by DVC)
+models/*.joblib
+models/backup/
+
+# MLflow
+mlruns/
+
+# Encryption keys (NEVER commit)
+configs/.encryption_key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log

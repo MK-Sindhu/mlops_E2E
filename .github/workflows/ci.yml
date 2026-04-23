@@ -1,0 +1,65 @@
+# CI/CD Pipeline
+# Guideline: Implement CI pipelines for seamless integration of code changes,
+# automated testing, and deployment of new models.
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Lint & Code Quality ──────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install flake8 black
+      - name: Run flake8
+        run: flake8 src/ tests/ --max-line-length=120
+      - name: Check formatting
+        run: black --check src/ tests/
+
+  # ── Unit & Integration Tests ─────────────────────
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --tb=short
+
+  # ── Build Docker Image ───────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t fraud-detection-api:${{ github.sha }} .
+      - name: Tag as latest
+        if: github.ref == 'refs/heads/main'
+        run: docker tag fraud-detection-api:${{ github.sha }} fraud-detection-api:latest
+
+  # ── Docker Compose Validation ────────────────────
+  validate-compose:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose
+        run: docker compose config --quiet

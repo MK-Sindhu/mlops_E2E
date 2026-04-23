@@ -1,0 +1,45 @@
+# Prometheus Alert Rules
+# Guideline: Trigger alerts if error rates exceed 5% or if data drift is detected
+
+groups:
+  - name: fraud_detection_alerts
+    rules:
+      # Alert if API error rate exceeds 5%
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected (> 5%)"
+          description: "API error rate has exceeded 5% for more than 2 minutes."
+
+      # Alert if model accuracy drops below threshold
+      - alert: ModelPerformanceDecay
+        expr: model_real_accuracy < 0.80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model accuracy has dropped below 80%"
+          description: "Real-world model accuracy from feedback loop is below threshold."
+
+      # Alert if fraud ratio is abnormally high (potential drift)
+      - alert: AbnormalFraudRatio
+        expr: fraud_ratio > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Abnormally high fraud prediction ratio"
+          description: "Fraud ratio {{ $value }} exceeds expected levels. Possible data drift."
+
+      # Alert if prediction latency exceeds business metric (200ms)
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(prediction_latency_seconds_bucket[5m])) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prediction latency exceeds 200ms (p95)"
+          description: "95th percentile latency is above the 200ms business requirement."
