@@ -1,8 +1,5 @@
 # Docker Compose: Multi-container deployment
-# Guideline: Use docker-compose for multi-container setup:
-#   one for API, one for model server, one for monitoring.
-
-version: "3.8"
+# Guideline: Use docker-compose for multi-container setup
 
 services:
   # ── FastAPI Prediction Service ──────────────────────
@@ -21,25 +18,10 @@ services:
       - ./data/processed:/app/data/processed
       - ./data/baselines:/app/data/baselines
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - fraud-net
-
-  # ── MLflow Tracking Server ─────────────────────────
-  mlflow:
-    image: python:3.11-slim
-    command: >
-      bash -c "pip install mlflow &&
-      mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri sqlite:///mlflow.db
-      --default-artifact-root /mlruns"
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./mlruns:/mlruns
     networks:
       - fraud-net
 
@@ -50,6 +32,7 @@ services:
       - "9090:9090"
     volumes:
       - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
     depends_on:
       - api
     networks:
