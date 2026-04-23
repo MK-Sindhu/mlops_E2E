@@ -22,7 +22,9 @@ class TestDataValidation:
     def _make_valid_df(self, n=100):
         """Create a valid dummy DataFrame matching expected schema."""
         data = {col: np.random.randn(n) for col in EXPECTED_COLUMNS if col != "Class"}
-        data["Class"] = np.random.choice([0, 1], size=n, p=[0.99, 0.01])
+        labels = [0] * (n - 2) + [0, 1]  # Guarantee both classes exist
+        np.random.shuffle(labels)
+        data["Class"] = labels
         data["Time"] = np.abs(data.get("Time", np.random.randn(n)))
         data["Amount"] = np.abs(np.random.randn(n) * 100)
         return pd.DataFrame(data)
