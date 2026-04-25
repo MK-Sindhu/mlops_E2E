@@ -1,0 +1,77 @@
+stages:
+  # Stage 1: Data Validation
+  validate:
+    cmd: python scripts/run_validate.py
+    deps:
+      - scripts/run_validate.py
+      - src/data/ingest.py
+      - src/data/validate.py
+      - data/raw/creditcard.csv
+    outs:
+      - data/validation_report.json:
+          cache: false
+
+  # Stage 2: Preprocessing
+  preprocess:
+    cmd: python scripts/run_preprocessing.py
+    deps:
+      - src/data/preprocess.py
+      - data/raw/creditcard.csv
+      - configs/config.yaml
+    outs:
+      - data/processed/X_train.csv
+      - data/processed/X_test.csv
+      - data/processed/y_train.csv
+      - data/processed/y_test.csv
+      - data/processed/scaler.joblib
+
+  # Stage 3: Feature Engineering
+  feature_engineering:
+    cmd: python scripts/run_feature_engineering.py
+    deps:
+      - src/features/feature_engineering.py
+      - data/processed/X_train.csv
+    outs:
+      - data/baselines/feature_baselines.json:
+          cache: false
+
+  # Stage 4: Model Training
+  train:
+    cmd: python scripts/run_training.py
+    deps:
+      - src/models/train.py
+      - src/features/feature_engineering.py
+      - data/processed/X_train.csv
+      - data/processed/X_test.csv
+      - data/processed/y_train.csv
+      - data/processed/y_test.csv
+      - configs/config.yaml
+    outs:
+      - models/best_model.joblib
+      - models/best_model.json
+      - models/feature_names.json
+    metrics:
+      - models/metrics.json:
+          cache: false
+
+  # Stage 5: Evaluate (generate plots)
+  evaluate:
+    cmd: python scripts/run_evaluate.py
+    deps:
+      - scripts/run_evaluate.py
+      - src/features/feature_engineering.py
+      - models/best_model.joblib
+      - data/processed/X_test.csv
+      - data/processed/y_test.csv
+    plots:
+      - reports/confusion_matrix.json:
+          cache: false
+          x: predicted
+          y: actual
+      - reports/roc_curve.json:
+          cache: false
+          x: fpr
+          y: tpr
+    metrics:
+      - reports/eval_metrics.json:
+          cache: false

@@ -1,0 +1,19 @@
+{
+  "schema": {
+    "valid": true,
+    "errors": []
+  },
+  "missing_values": {
+    "valid": true,
+    "missing_columns": {}
+  },
+  "target": {
+    "valid": true,
+    "message": "Target column is valid (binary: 0, 1)"
+  },
+  "value_ranges": {
+    "valid": true,
+    "warnings": []
+  },
+  "overall_valid": true
+}

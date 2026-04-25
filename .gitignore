@@ -19,6 +19,8 @@ data/processed/*.joblib
 
 # Models (tracked by DVC)
 models/*.joblib
+models/best_model.json
+models/feature_names.json
 models/backup/
 
 # MLflow
