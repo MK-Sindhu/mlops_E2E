@@ -9,6 +9,7 @@ build/
 
 # Virtual Environment
 venv/
+.venv/
 .env
 
 # Data (tracked by DVC)
