@@ -1,100 +1,100 @@
 """
-Model Retraining Script
-Triggered when drift is detected or performance decays.
-Guideline: Retrain models periodically or when performance degrades due to data drift.
-Guideline: Implement rollback mechanisms for failed deployments.
+Model Retraining Script.
+
+Delegates the actual training to ``train_and_log`` (Phase 8) so retraining
+goes through the same MLflow-tracked, registry-registered pipeline as a
+fresh dvc-pipeline run. Adds:
+    - run_name tagging so retrains are identifiable in MLflow
+    - auto-promotion to Staging if F1 >= performance_decay_threshold
+    - safe fallback: when below threshold, registers but does NOT promote
+
+Production promotion remains a manual step (scripts/promote_model.py),
+since retrains shouldn't ship to prod without human review.
+
+Guidelines:
+    - Retrain models when performance degrades or drift is detected.
+    - Implement rollback mechanisms — here, "rollback" is implicit: the
+      previously-promoted Staging/Production version stays in place when
+      the new version is below threshold.
 """
-import os
-import logging
 import json
-import shutil
-import yaml
-import pandas as pd
-import joblib
-from datetime import datetime
+import logging
+import os
+import sys
+import warnings
+from datetime import datetime, timezone
+from typing import Tuple
+
+# scripts/ isn't a package; allow `from src.*` imports when run directly
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# MLflow stage transitions print deprecation warnings — quiet for CLI
+warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
+
+from mlflow.tracking import MlflowClient  # noqa: E402
+
+from src.models.train import load_config, train_and_log  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_config(config_path: str = "configs/config.yaml") -> dict:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+def retrain(config: dict) -> Tuple[bool, dict]:
+    """Run a fresh training cycle, register in MLflow, auto-promote on success.
 
-
-def backup_current_model(model_path: str = "models/best_model.joblib"):
-    """Backup current model before retraining (for rollback)."""
-    if os.path.exists(model_path):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"models/backup/model_{timestamp}.joblib"
-        os.makedirs("models/backup", exist_ok=True)
-        shutil.copy2(model_path, backup_path)
-        logger.info(f"Model backed up to {backup_path}")
-        return backup_path
-    return None
-
-
-def rollback_model(backup_path: str, model_path: str = "models/best_model.joblib"):
-    """Rollback to a previous model version."""
-    if os.path.exists(backup_path):
-        shutil.copy2(backup_path, model_path)
-        logger.info(f"Rolled back to model: {backup_path}")
-    else:
-        logger.error(f"Backup not found: {backup_path}")
-
-
-def retrain(config: dict):
+    Returns:
+        (auto_promoted, info) where info contains run_id, run_name, metrics,
+        size_metrics, promoted (bool), and either ``version`` (on success) or
+        ``reason`` (on skipped promotion).
     """
-    Full retraining pipeline:
-    1. Backup current model
-    2. Retrain on latest data
-    3. Evaluate new model
-    4. If better → deploy; if worse → rollback
-    """
-    from src.models.train import train_model, evaluate_model
-    from src.features.feature_engineering import engineer_features
+    run_name = f"retrain-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    logger.info(f"Starting retraining run '{run_name}'")
 
-    logger.info("Starting model retraining...")
+    run_id, metrics, sizes = train_and_log(config, run_name=run_name)
 
-    # Step 1: Backup
-    backup_path = backup_current_model()
+    info: dict = {
+        "run_id": run_id,
+        "run_name": run_name,
+        "metrics": metrics,
+        "size_metrics": sizes,
+        "promoted": False,
+    }
 
-    # Step 2: Load data
-    proc_dir = config["data"]["processed_path"]
-    X_train = pd.read_csv(os.path.join(proc_dir, "X_train.csv"))
-    X_test = pd.read_csv(os.path.join(proc_dir, "X_test.csv"))
-    y_train = pd.read_csv(os.path.join(proc_dir, "y_train.csv")).squeeze()
-    y_test = pd.read_csv(os.path.join(proc_dir, "y_test.csv")).squeeze()
-
-    # Step 3: Feature engineering
-    X_train = engineer_features(X_train)
-    X_test = engineer_features(X_test)
-
-    # Step 4: Retrain
-    new_model = train_model(X_train, y_train, config)
-    new_metrics = evaluate_model(new_model, X_test, y_test)
-
-    # Step 5: Compare with threshold
     threshold = config["monitoring"]["performance_decay_threshold"]
-    if new_metrics["f1_score"] >= threshold:
-        # Deploy new model
-        model_path = "models/best_model.joblib"
-        joblib.dump(new_model, model_path)
-        logger.info(f"New model deployed! F1: {new_metrics['f1_score']:.4f}")
-        return True, new_metrics
-    else:
-        # Rollback
-        if backup_path:
-            rollback_model(backup_path)
-            logger.warning(
-                f"New model F1 ({new_metrics['f1_score']:.4f}) below threshold "
-                f"({threshold}). Rolled back."
-            )
-        return False, new_metrics
+    if metrics["f1_score"] < threshold:
+        logger.warning(
+            f"Retrained F1 ({metrics['f1_score']:.4f}) below threshold "
+            f"({threshold}). Version registered but NOT promoted. "
+            f"Existing Staging/Production untouched."
+        )
+        info["reason"] = f"below_threshold (f1={metrics['f1_score']:.4f} < {threshold})"
+        return False, info
+
+    # Resolve the version that was just registered for this run
+    client = MlflowClient()
+    name = config["mlflow"]["registered_model_name"]
+    versions = client.search_model_versions(f"name='{name}' AND run_id='{run_id}'")
+    if not versions:
+        logger.error(f"Could not find registered version for run_id={run_id}")
+        info["reason"] = "registry_lookup_failed"
+        return False, info
+
+    version = versions[0].version
+
+    # Auto-promote to Staging (alias + legacy stage). Production is gated
+    # on manual review via scripts/promote_model.py.
+    client.transition_model_version_stage(name=name, version=version, stage="Staging")
+    client.set_registered_model_alias(name=name, alias="staging", version=version)
+    logger.info(f"Promoted v{version} to Staging (alias=@staging)")
+
+    info["promoted"] = True
+    info["version"] = version
+    return True, info
 
 
 if __name__ == "__main__":
-    config = load_config()
-    success, metrics = retrain(config)
-    print(f"Retraining {'succeeded' if success else 'failed (rolled back)'}")
-    print(f"Metrics: {json.dumps(metrics, indent=2)}")
+    cfg = load_config()
+    success, info = retrain(cfg)
+    print("\n=== Retrain summary ===")
+    print(json.dumps(info, indent=2, default=str))
+    sys.exit(0 if success else 1)

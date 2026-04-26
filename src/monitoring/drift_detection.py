@@ -54,7 +54,9 @@ def detect_drift_ks_test(
             reference_data[col].dropna(),
             current_data[col].dropna()
         )
-        is_drifted = p_value < threshold
+        # Cast scipy / numpy scalars to plain Python types so the report
+        # is JSON-serialisable end-to-end (callers persist it via json.dumps).
+        is_drifted = bool(p_value < threshold)
         drift_report[col] = {
             "ks_statistic": round(float(ks_stat), 4),
             "p_value": round(float(p_value), 4),
@@ -67,7 +69,7 @@ def detect_drift_ks_test(
         "total_features": len(common_cols),
         "drifted_features_count": len(drifted_features),
         "drifted_features": drifted_features,
-        "drift_detected": len(drifted_features) > 0,
+        "drift_detected": bool(len(drifted_features) > 0),
         "feature_details": drift_report,
     }
 
@@ -114,7 +116,7 @@ def detect_drift_from_baselines(
         else:
             z_score = abs(current_mean - training_mean) / training_std
 
-        is_drifted = z_score > z_threshold
+        is_drifted = bool(z_score > z_threshold)
         drift_report[col] = {
             "training_mean": round(training_mean, 4),
             "current_mean": round(current_mean, 4),
@@ -128,7 +130,7 @@ def detect_drift_from_baselines(
         "total_features": len(drift_report),
         "drifted_features_count": len(drifted),
         "drifted_features": drifted,
-        "drift_detected": len(drifted) > 0,
+        "drift_detected": bool(len(drifted) > 0),
         "feature_details": drift_report,
     }
 
