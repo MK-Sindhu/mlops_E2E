@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Auto-load every JSON file in /etc/grafana/provisioning/dashboards as a dashboard.
+providers:
+  - name: 'fraud-detection'
+    orgId: 1
+    folder: 'Fraud Detection'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
