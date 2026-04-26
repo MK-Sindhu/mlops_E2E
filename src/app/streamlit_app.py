@@ -2,13 +2,16 @@
 Streamlit Demo UI — Credit Card Fraud Detection
 Interactive web UI for making predictions, viewing stats, and monitoring.
 """
-import streamlit as st
-import requests
 import json
-import pandas as pd
+import os
+
 import numpy as np
+import pandas as pd
+import requests
+import streamlit as st
 
 API_URL = "http://localhost:8000"
+FRAUD_STATS_PATH = "data/external/fraud_stats.json"
 
 st.set_page_config(page_title="Fraud Detection", page_icon="🔍", layout="wide")
 st.title("🔍 Credit Card Fraud Detection")
@@ -16,7 +19,10 @@ st.markdown("Real-time fraud detection powered by XGBoost + MLOps pipeline")
 
 # ── Sidebar ──────────────────────────────────────────────────────────
 st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Predict", "Batch Predict", "Feedback", "Dashboard", "About"])
+page = st.sidebar.radio(
+    "Go to",
+    ["Predict", "Batch Predict", "Feedback", "Dashboard", "Threat Landscape", "About"],
+)
 
 
 # ── Helper ───────────────────────────────────────────────────────────
@@ -178,6 +184,52 @@ elif page == "Dashboard":
         st.markdown("- [MLflow](http://localhost:5000) — Experiment Tracking")
     else:
         st.warning("API is not running")
+
+
+# ── Page: Threat Landscape ───────────────────────────────────────────
+elif page == "Threat Landscape":
+    st.header("Threat Landscape")
+    st.markdown("Public fraud-related context scraped from external sources.")
+
+    if not os.path.exists(FRAUD_STATS_PATH):
+        st.warning(
+            "No scraped data yet. Run `python scripts/run_scrape.py` from the "
+            "project root to fetch sources, then refresh this page."
+        )
+    else:
+        with open(FRAUD_STATS_PATH) as f:
+            data = json.load(f)
+
+        meta = data.get("_meta", {})
+        st.caption(
+            f"Last scraped: {meta.get('scraped_at', 'unknown')} • "
+            f"{meta.get('source_count', 0)} source(s) • "
+            f"scraper v{meta.get('scraper_version', '?')}"
+        )
+
+        for src in data.get("sources", []):
+            label = src.get("title") or src.get("name", "source")
+            with st.expander(f"📄 {label}", expanded=True):
+                st.markdown(f"**Source URL**: <{src.get('url', '')}>")
+                st.markdown(f"**Fetched at**: {src.get('fetched_at', '?')}")
+                if src.get("summary"):
+                    st.markdown("**Summary**")
+                    st.write(src["summary"])
+                if src.get("description"):
+                    st.markdown("**Description**")
+                    st.write(src["description"])
+                if src.get("note"):
+                    st.info(src["note"])
+                if src.get("sections"):
+                    st.markdown("**Sections found**")
+                    st.write(", ".join(src["sections"]))
+                if src.get("stats"):
+                    st.markdown("**Statistics extracted**")
+                    st.dataframe(pd.DataFrame(src["stats"]))
+                if src.get("external_links"):
+                    st.markdown("**Related links**")
+                    for link in src["external_links"]:
+                        st.markdown(f"- {link}")
 
 
 # ── Page: About ──────────────────────────────────────────────────────

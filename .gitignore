@@ -45,5 +45,8 @@ Thumbs.db
 data/*.db
 dvc_plots/
 
+# Scraped external data (regenerated, content-dependent on scrape time)
+data/external/
+
 # Notebook checkpoints
 .ipynb_checkpoints/
