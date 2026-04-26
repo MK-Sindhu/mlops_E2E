@@ -98,6 +98,12 @@ Or run stages individually via the `scripts/run_*.py` wrappers.
 docker-compose up --build
 ```
 
+### 5. Launch the Streamlit dashboard (local dev)
+```bash
+./scripts/run_streamlit.sh
+```
+Then open http://localhost:8501. The wrapper forces the project venv so the dashboard never picks up a system Python with a broken pyarrow.
+
 ### 5. Test endpoints
 ```bash
 # Health check
