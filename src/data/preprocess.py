@@ -111,34 +111,43 @@ def split_data(df: pd.DataFrame, config: dict):
 
 
 def run_preprocessing(config: dict):
-    """Run the full preprocessing pipeline."""
+    """Run the full preprocessing pipeline.
+
+    Order matters: split BEFORE scaling so the StandardScaler is fit only on
+    the training partition. Fitting on the full dataset would leak test-set
+    statistics into training.
+    """
     from src.data.ingest import load_raw_data
 
-    # Load raw data
+    # 1. Load
     df = load_raw_data(config["data"]["raw_path"])
 
-    # Clean
+    # 2. Clean (drop Time, NaN rows, duplicates)
     df_clean = clean_data(df, config)
 
-    # Scale
-    df_scaled, scaler = scale_features(df_clean, config, fit=True)
+    # 3. Split BEFORE scaling — prevents test-set leakage
+    X_train, X_test, y_train, y_test = split_data(df_clean, config)
 
-    # Split
-    X_train, X_test, y_train, y_test = split_data(df_scaled, config)
+    # 4. Fit scaler on X_train only, then transform both partitions
+    X_train_scaled, scaler = scale_features(X_train, config, fit=True)
+    X_test_scaled, _ = scale_features(X_test, config, fit=False, scaler=scaler)
 
-    # Save processed data
+    # 5. Save
     output_dir = config["data"]["processed_path"]
     os.makedirs(output_dir, exist_ok=True)
 
-    X_train.to_csv(os.path.join(output_dir, "X_train.csv"), index=False)
-    X_test.to_csv(os.path.join(output_dir, "X_test.csv"), index=False)
+    X_train_scaled.to_csv(os.path.join(output_dir, "X_train.csv"), index=False)
+    X_test_scaled.to_csv(os.path.join(output_dir, "X_test.csv"), index=False)
     y_train.to_csv(os.path.join(output_dir, "y_train.csv"), index=False)
     y_test.to_csv(os.path.join(output_dir, "y_test.csv"), index=False)
     joblib.dump(scaler, os.path.join(output_dir, "scaler.joblib"))
 
-    logger.info(f"Saved processed data to {output_dir}")
+    logger.info(
+        f"Saved processed data to {output_dir} "
+        f"(scaler fit on {scaler.n_samples_seen_} training rows; no test leakage)"
+    )
 
-    return X_train, X_test, y_train, y_test, scaler
+    return X_train_scaled, X_test_scaled, y_train, y_test, scaler
 
 
 if __name__ == "__main__":
