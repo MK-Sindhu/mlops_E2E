@@ -57,9 +57,42 @@ Instrumentator().instrument(app)
 
 # ── Global State ─────────────────────────────────────────────────────
 model = None
+model_source = "unloaded"   # human-readable: "registry: ..." or "file: ..."
+model_version = None        # MLflow registry version, when loaded from registry
 feature_names = None
 scaler = None
 prediction_counter = {"fraud": 0, "legit": 0}
+
+
+def _load_model_from_registry(name: str, stage_or_version: str):
+    """Load XGBClassifier from the MLflow Registry by downloading the joblib
+    artifact for the relevant version's run.
+
+    We deliberately avoid ``mlflow.xgboost.load_model()`` here — it can return
+    a raw ``Booster`` which lacks ``predict_proba``, and the API needs both
+    ``predict`` and ``predict_proba``. Loading the joblib artifact preserves
+    the full sklearn-style ``XGBClassifier``.
+
+    Returns:
+        (model, version_number, run_id)
+    """
+    import mlflow
+    from mlflow.tracking import MlflowClient
+
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient()
+
+    if stage_or_version.isdigit():
+        v = client.get_model_version(name, stage_or_version)
+    else:
+        versions = client.get_latest_versions(name, stages=[stage_or_version])
+        if not versions:
+            raise ValueError(f"No version of '{name}' is in stage '{stage_or_version}'")
+        v = versions[0]
+
+    local_path = client.download_artifacts(v.run_id, "model_files/best_model.joblib")
+    return joblib.load(local_path), v.version, v.run_id
 
 
 # ── Request/Response Schemas ─────────────────────────────────────────
@@ -86,20 +119,41 @@ class FeedbackResponse(BaseModel):
 # ── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
-    global model, feature_names, scaler
+    global model, model_source, model_version, feature_names, scaler
 
     # Initialize database
     init_db()
 
-    model_path = os.getenv("MODEL_PATH", "models/best_model.joblib")
-    features_path = os.getenv("FEATURES_PATH", "models/feature_names.json")
-    scaler_path = os.getenv("SCALER_PATH", "data/processed/scaler.joblib")
+    # Resolve model source. Precedence:
+    #   1. MLflow Registry (default) — by stage (e.g. "Production") or version
+    #   2. Local joblib fallback — for offline / no-MLflow environments
+    registered_name = os.getenv("MLFLOW_REGISTERED_NAME", "fraud-detection-xgboost")
+    model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
+    fallback_path = os.getenv("MODEL_PATH", "models/best_model.joblib")
 
     try:
-        model = joblib.load(model_path)
-        logger.info(f"Model loaded from {model_path}")
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
+        model, model_version, run_id = _load_model_from_registry(
+            registered_name, model_stage,
+        )
+        model_source = f"registry: {registered_name}/{model_stage} (v{model_version}, run {run_id[:16]})"
+        logger.info(f"Model loaded — {model_source}")
+    except Exception as registry_err:
+        logger.warning(
+            f"Could not load model from MLflow Registry "
+            f"({registered_name}/{model_stage}): {registry_err}. "
+            f"Falling back to local file."
+        )
+        try:
+            model = joblib.load(fallback_path)
+            model_source = f"file: {fallback_path}"
+            logger.info(f"Model loaded — {model_source}")
+        except Exception as file_err:
+            logger.error(f"Failed to load model from {fallback_path}: {file_err}")
+            model_source = f"FAILED ({file_err})"
+
+    # Feature names + scaler still live on disk (DVC-tracked).
+    features_path = os.getenv("FEATURES_PATH", "models/feature_names.json")
+    scaler_path = os.getenv("SCALER_PATH", "data/processed/scaler.joblib")
 
     try:
         with open(features_path, "r") as f:
@@ -125,7 +179,12 @@ def health_check():
 def readiness_check():
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    return {"status": "ready", "model_loaded": True}
+    return {
+        "status": "ready",
+        "model_loaded": True,
+        "model_source": model_source,
+        "model_version": model_version,
+    }
 
 
 # ── Prediction ───────────────────────────────────────────────────────
