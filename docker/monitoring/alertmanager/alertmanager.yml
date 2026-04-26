@@ -1,0 +1,83 @@
+# AlertManager configuration — Mailtrap SMTP routing.
+#
+# To use a real Mailtrap sandbox inbox:
+#   1. Create a free account at https://mailtrap.io
+#   2. Open your sandbox → "Integration: SMTP" → copy username + password
+#   3. Replace YOUR_MAILTRAP_USERNAME / YOUR_MAILTRAP_PASSWORD below
+#   4. docker compose restart alertmanager
+#
+# Until then, the SMTP send will fail with auth error — alerts still fire
+# (visible at http://localhost:9093) but no email is sent. That's fine for
+# CI/local testing.
+
+global:
+  resolve_timeout: 5m
+
+  # Mailtrap sandbox SMTP. Free tier, captures emails for review without
+  # delivering them to real inboxes — perfect for testing alert rendering.
+  smtp_smarthost: 'sandbox.smtp.mailtrap.io:2525'
+  smtp_from: 'alertmanager@fraud-detection.local'
+  smtp_auth_username: '897e8625da6033'
+  smtp_auth_password: 'e668016d6f00f2'
+  smtp_require_tls: true
+
+# Inhibit rules: when a critical alert fires for the same alertname/instance,
+# silence the warning-level version to avoid duplicate noise.
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+# Routing tree:
+#   - default goes to oncall@
+#   - critical alerts go to a wider distribution and ignore the
+#     long group_wait so we know within 10s
+route:
+  receiver: 'email-default'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s          # batch new alerts in the same group for 30s before notifying
+  group_interval: 5m       # then send updates every 5m if the group changes
+  repeat_interval: 12h     # re-send unresolved alerts every 12h
+
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: 'email-critical'
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  - name: 'email-default'
+    email_configs:
+      - to: 'oncall@fraud-detection.local'
+        send_resolved: true
+        headers:
+          Subject: '[fraud-detection] {{ .GroupLabels.alertname }} ({{ .GroupLabels.severity }})'
+        html: |
+          <h3>🚨 {{ .GroupLabels.alertname }}</h3>
+          <p><b>Severity:</b> {{ .GroupLabels.severity }}</p>
+          {{ range .Alerts }}
+            <hr>
+            <p><b>Summary:</b> {{ .Annotations.summary }}</p>
+            <p><b>Description:</b> {{ .Annotations.description }}</p>
+            <p><b>Started:</b> {{ .StartsAt }}</p>
+            <p><b>Labels:</b><br>{{ range .Labels.SortedPairs }}{{ .Name }} = {{ .Value }}<br>{{ end }}</p>
+          {{ end }}
+          <p><a href="http://localhost:9090/alerts">View in Prometheus</a> &nbsp;|&nbsp; <a href="http://localhost:3000">Grafana</a></p>
+
+  - name: 'email-critical'
+    email_configs:
+      - to: 'oncall@fraud-detection.local, sre@fraud-detection.local'
+        send_resolved: true
+        headers:
+          Subject: '[CRITICAL] {{ .GroupLabels.alertname }} — fraud-detection'
+        html: |
+          <h2 style="color:red">🔥 CRITICAL: {{ .GroupLabels.alertname }}</h2>
+          {{ range .Alerts }}
+            <p><b>{{ .Annotations.summary }}</b></p>
+            <p>{{ .Annotations.description }}</p>
+            <p><i>Started at {{ .StartsAt }}</i></p>
+          {{ end }}
+          <p><a href="http://localhost:9090/alerts">Prometheus alerts</a></p>

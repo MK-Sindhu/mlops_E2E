@@ -127,6 +127,21 @@ services:
     networks:
       - fraud-net
 
+  # ── AlertManager (alert routing → Mailtrap SMTP) ────────────────────
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: fraud-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./docker/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    networks:
+      - fraud-net
+
   # ── Prometheus (Metrics Collection) ────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
@@ -139,6 +154,7 @@ services:
     depends_on:
       - api
       - node-exporter
+      - alertmanager
     networks:
       - fraud-net
 
@@ -165,3 +181,4 @@ networks:
 
 volumes:
   grafana-data:
+  alertmanager-data:

@@ -6,6 +6,12 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# AlertManager — added in Phase 14. Fired alerts are POSTed here for routing.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 rule_files:
   - "alert_rules.yml"
 
