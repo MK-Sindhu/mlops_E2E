@@ -31,13 +31,17 @@ model:
     random_state: 42
   # Optimization for local hardware
   optimization:
-    quantize: true
+    quantize: true       # When true, force tree_method=hist + reduced max_bin
+    max_bin: 128         # Histogram bins (XGBoost default is 256)
     n_jobs: -1
 
 # MLflow settings
 mlflow:
-  tracking_uri: "http://localhost:5000"
+  # Default to local file store so training works without a running server.
+  # Override with env var: MLFLOW_TRACKING_URI=http://mlflow:5000
+  tracking_uri: "file:./mlruns"
   experiment_name: "fraud-detection"
+  registered_model_name: "fraud-detection-xgboost"
 
 # API settings
 api:

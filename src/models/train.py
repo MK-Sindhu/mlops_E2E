@@ -1,29 +1,42 @@
 """
-Model Training Module
-Train, evaluate, and register models with MLflow tracking.
-Guideline: Every experiment must be reproducible via a Git commit hash and MLflow run ID.
+Model Training Module.
+
+Single source of truth for training the fraud-detection XGBoost model.
+DVC stage and the experiment-sweep script both call ``train_and_log``.
+
+Guideline: Every experiment must be reproducible via Git commit hash + MLflow run ID.
 Guideline: Track model versions, hyperparameters, and performance metrics.
+Guideline: Optimize models for local hardware (quantization).
 """
+import json
+import logging
 import os
 import subprocess
-import logging
-import json
-import pandas as pd
-import numpy as np
-from sklearn.metrics import (
-    f1_score, precision_score, recall_score,
-    roc_auc_score, average_precision_score,
-    classification_report, confusion_matrix
-)
-from xgboost import XGBClassifier
+import time
+from typing import Optional, Tuple
+
+import joblib
 import mlflow
 import mlflow.xgboost
-import joblib
+import pandas as pd
 import yaml
-import time
+from sklearn.metrics import (
+    average_precision_score,
+    classification_report,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from xgboost import XGBClassifier
+
+from src.features.feature_engineering import engineer_features
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# --- Config helpers -----------------------------------------------------
 
 
 def load_config(config_path: str = "configs/config.yaml") -> dict:
@@ -32,143 +45,196 @@ def load_config(config_path: str = "configs/config.yaml") -> dict:
 
 
 def get_git_commit_hash() -> str:
-    """Get current Git commit hash for reproducibility."""
+    """Current Git HEAD — used as MLflow tag for full reproducibility."""
     try:
-        result = subprocess.run(
+        return subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True
-        )
-        return result.stdout.strip()
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
     except Exception:
         return "unknown"
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, config: dict) -> XGBClassifier:
-    """
-    Train an XGBoost classifier.
-    
-    Args:
-        X_train: Training features.
-        y_train: Training labels.
-        config: Model configuration.
-    
-    Returns:
-        Trained XGBClassifier model.
+def resolve_tracking_uri(config: dict) -> str:
+    """Honour MLFLOW_TRACKING_URI env override, else fall back to config."""
+    return os.environ.get("MLFLOW_TRACKING_URI", config["mlflow"]["tracking_uri"])
+
+
+# --- Model construction (where quantization lives) ---------------------
+
+
+def build_model(config: dict) -> XGBClassifier:
+    """Construct an XGBClassifier with optional quantization.
+
+    Quantization here means using XGBoost's histogram-based training with a
+    reduced ``max_bin``. Continuous features are bucketed into discrete bins
+    during training, which is the closest practical equivalent to quantization
+    for tree-based models — smaller memory footprint, slightly faster
+    inference, marginal accuracy cost.
+
+    When ``quantize`` is False, ``tree_method`` and ``max_bin`` are NOT passed,
+    so XGBoost uses its own defaults (currently ``hist`` / ``max_bin=256`` in
+    XGBoost 2.x).
     """
     params = config["model"]["params"]
-    logger.info(f"Training XGBoost with params: {params}")
+    opt = config["model"]["optimization"]
 
-    model = XGBClassifier(
+    kwargs = dict(
         n_estimators=params["n_estimators"],
         max_depth=params["max_depth"],
         learning_rate=params["learning_rate"],
         scale_pos_weight=params["scale_pos_weight"],
         eval_metric=params["eval_metric"],
         random_state=params["random_state"],
-        n_jobs=config["model"]["optimization"]["n_jobs"],
+        n_jobs=opt["n_jobs"],
         use_label_encoder=False,
     )
 
-    model.fit(X_train, y_train)
-    logger.info("Model training complete.")
-    return model
+    if opt.get("quantize", False):
+        kwargs["tree_method"] = "hist"
+        kwargs["max_bin"] = opt.get("max_bin", 128)
+        logger.info(
+            f"Quantization ON: tree_method=hist, max_bin={kwargs['max_bin']}"
+        )
+    else:
+        logger.info("Quantization OFF: using XGBoost defaults")
+
+    return XGBClassifier(**kwargs)
+
+
+# --- Evaluation --------------------------------------------------------
+
+
+def measure_inference_latency_ms(model, X_test: pd.DataFrame, n_iter: int = 100) -> float:
+    """Measure per-call single-row inference latency."""
+    start = time.perf_counter()
+    for _ in range(n_iter):
+        model.predict(X_test.iloc[:1])
+    return round((time.perf_counter() - start) / n_iter * 1000, 2)
 
 
 def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
-    """
-    Evaluate model and return metrics.
-    
-    Returns:
-        Dictionary of evaluation metrics.
-    """
+    """ML metrics + business metric (latency)."""
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
-
     metrics = {
-        "f1_score": float(f1_score(y_test, y_pred)),
+        "f1_score":  float(f1_score(y_test, y_pred)),
         "precision": float(precision_score(y_test, y_pred)),
-        "recall": float(recall_score(y_test, y_pred)),
-        "roc_auc": float(roc_auc_score(y_test, y_proba)),
-        "pr_auc": float(average_precision_score(y_test, y_proba)),
+        "recall":    float(recall_score(y_test, y_pred)),
+        "roc_auc":   float(roc_auc_score(y_test, y_proba)),
+        "pr_auc":    float(average_precision_score(y_test, y_proba)),
+        "avg_inference_latency_ms": measure_inference_latency_ms(model, X_test),
     }
-
-    # Measure inference latency (business metric: < 200ms)
-    start = time.time()
-    for _ in range(100):
-        model.predict(X_test.iloc[:1])
-    avg_latency_ms = (time.time() - start) / 100 * 1000
-    metrics["avg_inference_latency_ms"] = round(avg_latency_ms, 2)
-
-    logger.info(f"Evaluation metrics: {json.dumps(metrics, indent=2)}")
-    logger.info(f"\n{classification_report(y_test, y_pred)}")
-
+    logger.info(f"Metrics: {json.dumps(metrics, indent=2)}")
+    logger.info(f"\n{classification_report(y_test, y_pred, target_names=['Legit', 'Fraud'])}")
     return metrics
 
 
-def train_and_log(config: dict):
+# --- Persistence -------------------------------------------------------
+
+
+def save_artifacts(model, X_train: pd.DataFrame, metrics: dict) -> dict:
+    """Save model + metadata to disk, return paths."""
+    os.makedirs("models", exist_ok=True)
+    paths = {
+        "joblib":   "models/best_model.joblib",
+        "json":     "models/best_model.json",
+        "features": "models/feature_names.json",
+        "metrics":  "models/metrics.json",
+    }
+    joblib.dump(model, paths["joblib"])
+    model.save_model(paths["json"])
+    with open(paths["features"], "w") as f:
+        json.dump(list(X_train.columns), f)
+    with open(paths["metrics"], "w") as f:
+        json.dump(metrics, f, indent=2)
+    return paths
+
+
+def compute_model_size_metrics(paths: dict) -> dict:
+    """Report saved artifact sizes — visible proof quantization affects size."""
+    return {
+        "model_size_bytes_joblib": os.path.getsize(paths["joblib"]),
+        "model_size_bytes_json":   os.path.getsize(paths["json"]),
+    }
+
+
+# --- Orchestrator -----------------------------------------------------
+
+
+def train_and_log(
+    config: dict,
+    run_name: Optional[str] = None,
+) -> Tuple[str, dict, dict]:
+    """Run full training pipeline with MLflow logging + registry registration.
+
+    Returns:
+        (run_id, metrics, size_metrics)
     """
-    Full training pipeline with MLflow logging.
-    Logs: git hash, hyperparameters, metrics, model artifact.
-    """
-    # Setup MLflow
-    mlflow.set_tracking_uri(config["mlflow"]["tracking_uri"])
+    mlflow.set_tracking_uri(resolve_tracking_uri(config))
     mlflow.set_experiment(config["mlflow"]["experiment_name"])
 
-    # Load processed data
-    proc_dir = config["data"]["processed_path"]
-    X_train = pd.read_csv(os.path.join(proc_dir, "X_train.csv"))
-    X_test = pd.read_csv(os.path.join(proc_dir, "X_test.csv"))
-    y_train = pd.read_csv(os.path.join(proc_dir, "y_train.csv")).squeeze()
-    y_test = pd.read_csv(os.path.join(proc_dir, "y_test.csv")).squeeze()
+    proc = config["data"]["processed_path"]
+    X_train = engineer_features(pd.read_csv(os.path.join(proc, "X_train.csv")))
+    X_test  = engineer_features(pd.read_csv(os.path.join(proc, "X_test.csv")))
+    y_train = pd.read_csv(os.path.join(proc, "y_train.csv")).squeeze()
+    y_test  = pd.read_csv(os.path.join(proc, "y_test.csv")).squeeze()
 
-    # Apply feature engineering
-    from src.features.feature_engineering import engineer_features
-    X_train = engineer_features(X_train)
-    X_test = engineer_features(X_test)
+    logger.info(f"Train: {X_train.shape}, Test: {X_test.shape}")
 
-    with mlflow.start_run() as run:
-        # Log Git commit hash for reproducibility
-        git_hash = get_git_commit_hash()
-        mlflow.set_tag("git_commit_hash", git_hash)
+    with mlflow.start_run(run_name=run_name) as run:
+        # Reproducibility tags
+        mlflow.set_tag("git_commit_hash", get_git_commit_hash())
         mlflow.set_tag("model_type", config["model"]["algorithm"])
+        mlflow.set_tag("quantized", str(config["model"]["optimization"].get("quantize", False)))
 
-        # Log hyperparameters
+        # Hyperparameters
         mlflow.log_params(config["model"]["params"])
+        mlflow.log_params({f"opt_{k}": v for k, v in config["model"]["optimization"].items()})
 
         # Train
-        model = train_model(X_train, y_train, config)
+        model = build_model(config)
+        model.fit(X_train, y_train)
 
         # Evaluate
         metrics = evaluate_model(model, X_test, y_test)
-
-        # Log metrics
         mlflow.log_metrics(metrics)
 
-        # Log model artifact
-        mlflow.xgboost.log_model(model, "model")
+        # Persist + size
+        paths = save_artifacts(model, X_train, metrics)
+        size_metrics = compute_model_size_metrics(paths)
+        mlflow.log_metrics(size_metrics)
 
-        # Save model locally too
-        os.makedirs("models", exist_ok=True)
-        model_path = "models/best_model.joblib"
-        joblib.dump(model, model_path)
-        mlflow.log_artifact(model_path)
+        # Register model in MLflow Model Registry
+        registered_name = config["mlflow"].get("registered_model_name")
+        if registered_name:
+            mlflow.xgboost.log_model(
+                model, "model", registered_model_name=registered_name,
+            )
+            logger.info(f"Registered as '{registered_name}'")
+        else:
+            mlflow.xgboost.log_model(model, "model")
 
-        # Save feature names for serving
-        feature_names = list(X_train.columns)
-        with open("models/feature_names.json", "w") as f:
-            json.dump(feature_names, f)
-        mlflow.log_artifact("models/feature_names.json")
+        # Auxiliary artifacts
+        for p in paths.values():
+            mlflow.log_artifact(p, artifact_path="model_files")
+        for aux in (
+            "data/processed/scaler.joblib",
+            "configs/config.yaml",
+            "data/baselines/feature_baselines.json",
+        ):
+            if os.path.exists(aux):
+                mlflow.log_artifact(aux, artifact_path="auxiliary")
 
         logger.info(f"MLflow Run ID: {run.info.run_id}")
-        logger.info(f"Git Commit: {git_hash}")
-        logger.info(f"Model saved to {model_path}")
-
-        return run.info.run_id, metrics
+        return run.info.run_id, metrics, size_metrics
 
 
 if __name__ == "__main__":
     config = load_config()
-    run_id, metrics = train_and_log(config)
-    print(f"\nRun ID: {run_id}")
-    print(f"F1 Score: {metrics['f1_score']:.4f}")
-    print(f"Inference Latency: {metrics['avg_inference_latency_ms']:.2f}ms")
+    run_id, metrics, sizes = train_and_log(config)
+    print(f"\nRun ID:   {run_id}")
+    print(f"F1:       {metrics['f1_score']:.4f}")
+    print(f"PR-AUC:   {metrics['pr_auc']:.4f}")
+    print(f"Latency:  {metrics['avg_inference_latency_ms']}ms")
+    print(f"Size:     {sizes['model_size_bytes_joblib']:,} bytes (joblib)")
