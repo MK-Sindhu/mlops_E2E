@@ -1,52 +1,138 @@
-# Docker Compose: Multi-container deployment
-# Guideline: Use docker-compose for multi-container setup
+# Docker Compose: 5-service local stack.
+#
+#   ┌────────────────┐   http://api:8000        ┌──────────────────┐
+#   │   streamlit    │ ─────────────────────▶   │       api        │
+#   │   (dashboard)  │                          │     (FastAPI)    │
+#   └────────────────┘                          └────┬─────────────┘
+#                                                    │ http://mlflow:5000
+#                                                    ▼
+#                                              ┌──────────────────┐
+#                                              │      mlflow      │
+#                                              │ (tracking + reg) │
+#                                              └──────────────────┘
+#
+#   ┌────────────────┐   scrape /metrics        ┌──────────────────┐
+#   │   prometheus   │ ◀──────────────────────  │       api        │
+#   └─────┬──────────┘                          └──────────────────┘
+#         │ datasource
+#         ▼
+#   ┌────────────────┐
+#   │     grafana    │  http://localhost:3000  (admin/admin)
+#   └────────────────┘
+#
+# Guideline (II.D): one container for the API, one for the model server,
+# one for monitoring.
 
 services:
-  # ── FastAPI Prediction Service ──────────────────────
+
+  # ── MLflow Tracking + Model Registry (the "model server") ──────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: fraud-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount at the host's absolute path so existing runs' artifact_uri
+      # (which MLflow stores as absolute paths) resolve inside the container.
+      - ./mlruns:${PWD}/mlruns
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri file://${PWD}/mlruns
+      --default-artifact-root file://${PWD}/mlruns
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - fraud-net
+
+  # ── FastAPI Prediction Service ─────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: fraud-api
     ports:
       - "8000:8000"
     environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_REGISTERED_NAME=fraud-detection-xgboost
+      - MLFLOW_MODEL_STAGE=Production
       - MODEL_PATH=models/best_model.joblib
       - FEATURES_PATH=models/feature_names.json
       - SCALER_PATH=data/processed/scaler.joblib
     volumes:
-      - ./models:/app/models
-      - ./data/processed:/app/data/processed
-      - ./data/baselines:/app/data/baselines
+      - ./models:/app/models:ro
+      - ./data/processed:/app/data/processed:ro
+      - ./data/baselines:/app/data/baselines:ro
+      - ./data:/app/data
+      # Mount at the host's absolute path so existing runs' artifact_uri
+      # (which MLflow stores as absolute paths) resolve inside the container.
+      - ./mlruns:${PWD}/mlruns
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+    depends_on:
+      mlflow:
+        condition: service_healthy
     networks:
       - fraud-net
 
-  # ── Prometheus (Metrics Collection) ────────────────
+  # ── Streamlit Dashboard ────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraud-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+    command: >
+      streamlit run src/app/streamlit_app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - fraud-net
+
+  # ── Prometheus (Metrics Collection) ────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
+    container_name: fraud-prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./docker/monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
     depends_on:
       - api
     networks:
       - fraud-net
 
-  # ── Grafana (Dashboards & Alerting) ────────────────
+  # ── Grafana (Dashboards) ───────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
+    container_name: fraud-grafana
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
-      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
     networks:
@@ -55,3 +141,6 @@ services:
 networks:
   fraud-net:
     driver: bridge
+
+volumes:
+  grafana-data:

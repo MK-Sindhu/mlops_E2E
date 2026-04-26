@@ -17,7 +17,7 @@ import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import streamlit as st  # noqa: E402
 
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 FRAUD_STATS_PATH = "data/external/fraud_stats.json"
 
 st.set_page_config(page_title="Fraud Detection", page_icon="🔍", layout="wide")
