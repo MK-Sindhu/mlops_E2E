@@ -4,18 +4,24 @@ Creates new features and computes drift baselines.
 Guideline: Version feature engineering logic separately from model logic.
 Guideline: Calculate statistical baselines during EDA for drift detection.
 """
-import os
+import hashlib
 import json
 import logging
-import pandas as pd
+import os
+from datetime import datetime, timezone
+from typing import Dict, Optional
+
 import numpy as np
-from typing import Dict
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Feature engineering version — bump this when logic changes
 FEATURE_VERSION = "1.0.0"
+
+# Schema version for the baseline JSON file (independent of FEATURE_VERSION)
+BASELINE_SCHEMA_VERSION = "1.0.0"
 
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -56,26 +62,44 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     return df_feat
 
 
-def compute_drift_baselines(df: pd.DataFrame, output_path: str) -> Dict:
+def _file_md5(path: str) -> str:
+    """MD5 hash of a file's contents (chunked for large files)."""
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_drift_baselines(
+    df: pd.DataFrame,
+    output_path: str,
+    source_path: Optional[str] = None,
+) -> Dict:
     """
     Compute statistical baselines for drift detection.
-    Saves mean, variance, and distribution info for each feature.
-    
+    Saves mean, variance, and distribution info for each feature, plus
+    provenance metadata so the drift detector can verify the baseline
+    is still aligned with the data version it expects.
+
     Guideline: Calculate the statistical baseline (mean, variance, distribution)
     of features to be used later for drift detection.
-    
+
     Args:
         df: Training DataFrame (features only, no target).
-        output_path: Path to save baselines JSON.
-    
+        output_path: Directory to save baselines JSON in.
+        source_path: Optional path to the source data file used to compute
+            baselines. If provided, its MD5 is stored as provenance.
+
     Returns:
-        Dictionary of baseline statistics per feature.
+        Dictionary of baseline statistics per feature (the inner ``features``
+        block of the JSON, not the metadata wrapper).
     """
     logger.info("Computing drift baselines...")
-    baselines = {}
+    feature_stats = {}
 
     for col in df.columns:
-        stats = {
+        feature_stats[col] = {
             "mean": float(df[col].mean()),
             "std": float(df[col].std()),
             "variance": float(df[col].var()),
@@ -85,16 +109,31 @@ def compute_drift_baselines(df: pd.DataFrame, output_path: str) -> Dict:
             "q25": float(df[col].quantile(0.25)),
             "q75": float(df[col].quantile(0.75)),
         }
-        baselines[col] = stats
 
-    # Save baselines
+    meta = {
+        "baseline_schema_version": BASELINE_SCHEMA_VERSION,
+        "feature_version": FEATURE_VERSION,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "row_count": int(len(df)),
+        "feature_count": len(feature_stats),
+    }
+    if source_path and os.path.exists(source_path):
+        meta["source_data_path"] = source_path
+        meta["source_data_md5"] = _file_md5(source_path)
+
+    payload = {"_meta": meta, "features": feature_stats}
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     baseline_file = os.path.join(output_path, "feature_baselines.json")
     with open(baseline_file, "w") as f:
-        json.dump(baselines, f, indent=2)
+        json.dump(payload, f, indent=2)
 
-    logger.info(f"Saved baselines for {len(baselines)} features to {baseline_file}")
-    return baselines
+    logger.info(
+        f"Saved baselines for {len(feature_stats)} features "
+        f"(rows={meta['row_count']}, feature_version={FEATURE_VERSION}) "
+        f"to {baseline_file}"
+    )
+    return feature_stats
 
 
 def get_feature_names() -> list:

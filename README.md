@@ -120,6 +120,9 @@ curl -X POST http://localhost:8000/feedback \
   -d '{"transaction_id": "txn_123", "actual_label": 1}'
 ```
 
+## Exploratory Data Analysis
+See [notebooks/eda.ipynb](notebooks/eda.ipynb) for the full EDA: class imbalance (1:577), discriminative-feature ranking, time/amount distributions, and outlier analysis. Static plots are committed to [docs/](docs/) for read-only viewing without running the notebook.
+
 ## Reproducibility
 Every experiment is reproducible via:
 - **Git commit hash** — exact code version

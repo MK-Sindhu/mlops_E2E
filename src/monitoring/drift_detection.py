@@ -16,9 +16,15 @@ logger = logging.getLogger(__name__)
 
 
 def load_baselines(baselines_path: str = "data/baselines/feature_baselines.json") -> Dict:
-    """Load stored feature baselines."""
+    """Load the per-feature baseline statistics dict."""
     with open(baselines_path, "r") as f:
-        return json.load(f)
+        return json.load(f)["features"]
+
+
+def load_baseline_meta(baselines_path: str = "data/baselines/feature_baselines.json") -> Dict:
+    """Load baseline provenance metadata (feature_version, source_data_md5, etc.)."""
+    with open(baselines_path, "r") as f:
+        return json.load(f)["_meta"]
 
 
 def detect_drift_ks_test(
@@ -130,4 +136,6 @@ def detect_drift_from_baselines(
 if __name__ == "__main__":
     # Example usage
     baselines = load_baselines()
+    meta = load_baseline_meta()
     print(f"Loaded baselines for {len(baselines)} features")
+    print(f"Baseline metadata: {meta}")
