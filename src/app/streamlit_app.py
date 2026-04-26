@@ -4,11 +4,18 @@ Interactive web UI for making predictions, viewing stats, and monitoring.
 """
 import json
 import os
+import sys
 
-import numpy as np
-import pandas as pd
-import requests
-import streamlit as st
+# `streamlit run` only adds the script's own directory to sys.path,
+# so `from src.*` imports below would fail. Add the project root explicitly.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import requests  # noqa: E402
+import streamlit as st  # noqa: E402
 
 API_URL = "http://localhost:8000"
 FRAUD_STATS_PATH = "data/external/fraud_stats.json"
@@ -39,6 +46,31 @@ if api_healthy:
     st.sidebar.success("API: Connected")
 else:
     st.sidebar.error("API: Not running. Start with `uvicorn src.api.app:app --port 8000`")
+
+
+def show_explanation(txn_id, top_k=8):
+    """Fetch and display the SHAP explanation for a prediction.
+
+    Best-effort — silently skips if /explain isn't reachable.
+    """
+    try:
+        resp = requests.get(
+            f"{API_URL}/explain",
+            params={"transaction_id": txn_id, "top_k": top_k},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return
+        data = resp.json()
+        st.markdown("**Why this prediction (SHAP)**")
+        st.caption(
+            f"Base value: {data['base_value']:.4f} • "
+            f"top {len(data['top_contributions'])} contributions by |shap_value|"
+        )
+        contrib_df = pd.DataFrame(data["top_contributions"]).set_index("feature")
+        st.bar_chart(contrib_df["shap_value"])
+    except Exception:
+        pass
 
 
 # ── Page: Predict ────────────────────────────────────────────────────
@@ -73,6 +105,7 @@ if page == "Predict":
                 else:
                     st.success(f"✅ Legitimate (probability: {result['fraud_probability']:.4f})")
                 st.json(result)
+                show_explanation(result["transaction_id"])
 
     with col2:
         st.subheader("Option 2: Random Test Sample")
@@ -97,6 +130,7 @@ if page == "Predict":
 
             st.metric("Latency", f"{result['latency_ms']:.2f} ms")
             st.json(result)
+            show_explanation(result["transaction_id"])
 
 
 # ── Page: Batch Predict ──────────────────────────────────────────────

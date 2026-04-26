@@ -1,57 +1,69 @@
 """
-End-to-End Tests - Full predict → feedback pipeline.
+End-to-End Tests — full predict → explain → feedback → stats pipeline.
+
+Skips gracefully if no model is loaded (e.g. CI without registry access).
 Guideline: Implement unit, integration, and end-to-end tests.
 """
+import pandas as pd
 import pytest
-import numpy as np
 from fastapi.testclient import TestClient
 
 from src.api.app import app
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
+
+
+def _real_features() -> list:
+    """Engineered feature row from X_test for use as request input."""
+    from src.features.feature_engineering import engineer_features
+    df = pd.read_csv("data/processed/X_test.csv").head(1)
+    return engineer_features(df).iloc[0].tolist()
 
 
 class TestEndToEndPipeline:
-    """
-    E2E test: simulate a transaction being predicted and then feedback submitted.
-    NOTE: This test requires a model to be loaded. In CI, it runs after training.
-    """
 
-    @pytest.mark.skipif(
-        True,  # Set to False when model is trained and available
-        reason="Model not available in this environment"
-    )
-    def test_full_predict_feedback_flow(self, client):
-        # Step 1: Make a prediction
-        fake_features = np.random.randn(33).tolist()  # Adjust to actual feature count
-        predict_response = client.post("/predict", json={
-            "features": fake_features,
-            "transaction_id": "e2e_test_001"
-        })
-        assert predict_response.status_code == 200
-        pred_data = predict_response.json()
-        assert "prediction" in pred_data
-        assert pred_data["transaction_id"] == "e2e_test_001"
-        assert pred_data["latency_ms"] < 200  # Business metric check
+    def test_full_predict_explain_feedback_stats_flow(self, client):
+        ready = client.get("/ready").json()
+        if not ready.get("model_loaded"):
+            pytest.skip("Model not loaded — skipping E2E")
 
-        # Step 2: Submit feedback (ground truth)
-        feedback_response = client.post("/feedback", json={
-            "transaction_id": "e2e_test_001",
-            "actual_label": 0
+        features = _real_features()
+
+        # 1. Predict
+        pred = client.post("/predict", json={
+            "features": features,
+            "transaction_id": "e2e_full_001",
         })
-        assert feedback_response.status_code == 200
-        fb_data = feedback_response.json()
-        assert fb_data["total_feedback"] >= 1
+        assert pred.status_code == 200
+        pred_data = pred.json()
+        assert pred_data["prediction"] in (0, 1)
+        assert pred_data["latency_ms"] < 200, "Inference latency exceeded business SLA"
+
+        # 2. Explain
+        exp = client.get("/explain", params={
+            "transaction_id": "e2e_full_001",
+            "top_k": 5,
+        })
+        assert exp.status_code == 200
+        assert len(exp.json()["top_contributions"]) == 5
+
+        # 3. Feedback
+        fb = client.post("/feedback", json={
+            "transaction_id": "e2e_full_001",
+            "actual_label": pred_data["prediction"],
+        })
+        assert fb.status_code == 200
+        assert fb.json()["total_feedback"] >= 1
+
+        # 4. Stats reflect the new prediction
+        stats = client.get("/stats")
+        assert stats.status_code == 200
+        assert stats.json()["total_predictions"] >= 1
 
     def test_health_then_metrics(self, client):
-        """Basic E2E: health check → metrics available."""
-        # Health
-        health = client.get("/health")
-        assert health.status_code == 200
-
-        # Metrics endpoint works
-        metrics = client.get("/metrics")
-        assert metrics.status_code == 200
+        assert client.get("/health").status_code == 200
+        assert client.get("/metrics").status_code == 200
