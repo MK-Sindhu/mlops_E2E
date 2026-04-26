@@ -7,6 +7,16 @@ Credit card fraud is a significant financial threat, costing billions annually. 
 - **ML Metrics**: F1-Score, Precision, Recall, PR-AUC (due to class imbalance)
 - **Business Metrics**: Inference latency < 200ms per transaction
 
+## Dataset
+- **Source**: Kaggle [Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) (European cardholders, Sep 2013)
+- **Size**: 284,807 transactions, 31 columns
+- **Schema**: `Time`, `V1`–`V28` (PCA-transformed for confidentiality), `Amount`, `Class` (0 = legit, 1 = fraud)
+- **Known biases / caveats**:
+  - Extreme class imbalance — only 492 frauds (~0.172%). Use PR-AUC, not ROC-AUC, as the headline metric.
+  - `V1`–`V28` are anonymised PCA components — feature interpretation is limited.
+  - Single-region, single-time-window — distribution may not generalise to other markets.
+- **Storage**: Raw CSV is encrypted at rest with Fernet (`creditcard.csv.enc`) and tracked via DVC.
+
 ## Architecture
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐
@@ -70,17 +80,18 @@ credit-card-fraud-detection/
 pip install -r requirements.txt
 ```
 
-### 2. Download & prepare data
+### 2. Get the data
+Download `creditcard.csv` from [Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) and place it at `data/raw/creditcard.csv`, or pull the DVC-tracked version:
 ```bash
-python scripts/download_data.py
-python src/data/validate.py
-python src/data/preprocess.py
+dvc pull
 ```
 
-### 3. Train model
+### 3. Run the full pipeline
+DVC stages (validate → preprocess → feature_engineering → train → evaluate):
 ```bash
-python src/models/train.py
+dvc repro
 ```
+Or run stages individually via the `scripts/run_*.py` wrappers.
 
 ### 4. Run with Docker Compose
 ```bash
