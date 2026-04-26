@@ -39,3 +39,11 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Runtime artifacts
+*.db
+data/*.db
+dvc_plots/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
