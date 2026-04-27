@@ -58,6 +58,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Explicit image name so Swarm can find the locally-built image after
+    # `docker compose build` (Swarm itself does not build).
+    image: fraud-api:local
     container_name: fraud-api
     ports:
       - "8000:8000"
@@ -82,9 +85,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    # Swarm-mode replicas + restart_policy live in docker-compose.swarm.yml
+    # (compose mode would honor deploy.replicas and create port conflicts).
+    # Short-form depends_on for Swarm parser compatibility — the api's own
+    # healthcheck (with retries) handles the brief mlflow startup race.
     depends_on:
-      mlflow:
-        condition: service_healthy
+      - mlflow
     networks:
       - fraud-net
 
@@ -93,6 +99,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: fraud-api:local   # same image as api; different command
     container_name: fraud-streamlit
     ports:
       - "8501:8501"
@@ -113,8 +120,7 @@ services:
     volumes:
       - ./data:/app/data:ro
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     networks:
       - fraud-net
 
@@ -143,6 +149,7 @@ services:
     build:
       context: .
       dockerfile: docker/airflow.Dockerfile
+    image: fraud-airflow:local
     container_name: fraud-airflow
     ports:
       # Host 8080 is often taken by Jenkins/Tomcat/dev servers; expose on 8090.
@@ -171,23 +178,25 @@ services:
       - ./models:/project/models
       - ./data:/project/data
       - ./mlruns:${PWD}/mlruns
-    # Init DB → create admin/admin → run scheduler in background → webserver in foreground.
-    # We don't use `airflow standalone` because it ignores _AIRFLOW_WWW_USER_*
-    # env vars and generates a random password instead.
+    # Init DB → create admin user (password from secret) → run scheduler in
+    # background → webserver in foreground. We don't use `airflow standalone`
+    # because it ignores _AIRFLOW_WWW_USER_* env vars and generates its own
+    # random password.
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         set -e
         airflow db migrate
         airflow users create \
-          --username admin --password admin \
+          --username admin --password "$$(cat /run/secrets/airflow_admin_password)" \
           --firstname Admin --lastname User \
           --role Admin --email admin@fraud.local || true
         airflow scheduler &
         exec airflow webserver
+    secrets:
+      - airflow_admin_password
     depends_on:
-      mlflow:
-        condition: service_healthy
+      - mlflow
     networks:
       - fraud-net
 
@@ -203,6 +212,8 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
+    secrets:
+      - mailtrap_smtp_password
     networks:
       - fraud-net
 
@@ -229,20 +240,37 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Grafana's `__FILE` suffix tells it to read the value from a file path
+      # rather than the env var directly. The file is the docker secret.
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_password
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
+    secrets:
+      - grafana_admin_password
     depends_on:
       - prometheus
     networks:
       - fraud-net
 
 networks:
-  fraud-net:
-    driver: bridge
+  # No explicit driver — compose defaults to `bridge`, `docker stack
+  # deploy` defaults to `overlay`. Swarm services cannot run on bridge.
+  fraud-net: {}
 
 volumes:
   grafana-data:
   alertmanager-data:
+
+# Docker secrets — file-sourced so the same compose file works in both
+# `docker compose up` (file is bind-mounted at /run/secrets/<name>) and
+# `docker stack deploy` (file is read once, stored encrypted in Swarm's
+# Raft log, then mounted at /run/secrets/<name> on each task).
+secrets:
+  mailtrap_smtp_password:
+    file: ./secrets/mailtrap_smtp_password
+  airflow_admin_password:
+    file: ./secrets/airflow_admin_password
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password

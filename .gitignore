@@ -29,6 +29,10 @@ mlruns/
 # Encryption keys (NEVER commit)
 configs/.encryption_key
 
+# Docker secrets — real values live here, never committed.
+# secrets.example/ holds placeholder files that ARE committed.
+secrets/
+
 # IDE
 .vscode/
 .idea/

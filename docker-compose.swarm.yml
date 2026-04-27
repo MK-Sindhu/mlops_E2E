@@ -1,0 +1,21 @@
+# Swarm-only overrides applied on top of docker-compose.yml.
+#
+# Used by:    docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml fraud
+# (or via:    ./scripts/swarm_up.sh)
+#
+# Why split: docker compose v2 now honors deploy.replicas, which would
+# create port conflicts in dev (3 containers all wanting 8000:8000).
+# Keeping the deploy block here means compose-mode runs single-replica.
+
+services:
+  api:
+    # Swarm ignores container_name when replicas > 1; the warning is harmless.
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback

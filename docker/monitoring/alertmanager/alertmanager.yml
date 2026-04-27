@@ -1,14 +1,11 @@
 # AlertManager configuration — Mailtrap SMTP routing.
 #
-# To use a real Mailtrap sandbox inbox:
-#   1. Create a free account at https://mailtrap.io
-#   2. Open your sandbox → "Integration: SMTP" → copy username + password
-#   3. Replace YOUR_MAILTRAP_USERNAME / YOUR_MAILTRAP_PASSWORD below
-#   4. docker compose restart alertmanager
+# Credentials come from docker secrets mounted at /run/secrets/. Edit the real
+# values in ./secrets/ (gitignored); see secrets.example/README.md for setup.
 #
-# Until then, the SMTP send will fail with auth error — alerts still fire
-# (visible at http://localhost:9093) but no email is sent. That's fine for
-# CI/local testing.
+# Until they're filled in, the SMTP send will fail with auth error — alerts
+# still fire (visible at http://localhost:9093) but no email is sent. That's
+# fine for CI/local testing.
 
 global:
   resolve_timeout: 5m
@@ -17,8 +14,11 @@ global:
   # delivering them to real inboxes — perfect for testing alert rendering.
   smtp_smarthost: 'sandbox.smtp.mailtrap.io:2525'
   smtp_from: 'alertmanager@fraud-detection.local'
+  # AlertManager only supports `_file` variants for the *password* side
+  # of SMTP auth (no `smtp_auth_username_file` in v0.32). Username stays
+  # inline; password comes from a docker secret.
   smtp_auth_username: '897e8625da6033'
-  smtp_auth_password: 'e668016d6f00f2'
+  smtp_auth_password_file: '/run/secrets/mailtrap_smtp_password'
   smtp_require_tls: true
 
 # Inhibit rules: when a critical alert fires for the same alertname/instance,
