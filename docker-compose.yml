@@ -29,6 +29,9 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.10.0
     container_name: fraud-mlflow
+    # Match the host user so artifacts written by mlflow stay writable
+    # by other services that share the ./mlruns bind mount.
+    user: "1000:1000"
     ports:
       - "5000:5000"
     volumes:
@@ -99,6 +102,14 @@ services:
       streamlit run src/app/streamlit_app.py
       --server.port=8501
       --server.address=0.0.0.0
+    # Override the Dockerfile's healthcheck (which pings :8000, the API port)
+    # since this container only serves Streamlit on :8501.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     volumes:
       - ./data:/app/data:ro
     depends_on:
@@ -124,6 +135,59 @@ services:
       - --path.sysfs=/host/sys
       - --path.rootfs=/rootfs
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)
+    networks:
+      - fraud-net
+
+  # ── Airflow (scheduled retraining + scraping DAGs) ─────────────────
+  airflow:
+    build:
+      context: .
+      dockerfile: docker/airflow.Dockerfile
+    container_name: fraud-airflow
+    ports:
+      # Host 8080 is often taken by Jenkins/Tomcat/dev servers; expose on 8090.
+      - "8090:8080"
+    environment:
+      # Standalone mode = webserver + scheduler in one process; SQLite backend.
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      # Use Airflow's default SQLite path ($AIRFLOW_HOME/airflow.db) — the
+      # directory is created with airflow-user permissions during image build.
+      # DAG run history is ephemeral on `docker compose down`; that's fine
+      # for a learning project — DAGs themselves live in ./airflow/dags/.
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # MLflow tracking URI for retrain DAG (overrides config default)
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      PYTHONPATH: /project
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      # Project files the DAGs operate on. Mounted at /project (matched by
+      # PYTHONPATH above) and at the same host absolute path for mlruns,
+      # so existing artifact_uri values resolve identically inside Airflow.
+      - ./scripts:/project/scripts:ro
+      - ./src:/project/src:ro
+      - ./configs:/project/configs:ro
+      - ./models:/project/models
+      - ./data:/project/data
+      - ./mlruns:${PWD}/mlruns
+    # Init DB → create admin/admin → run scheduler in background → webserver in foreground.
+    # We don't use `airflow standalone` because it ignores _AIRFLOW_WWW_USER_*
+    # env vars and generates a random password instead.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        airflow db migrate
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@fraud.local || true
+        airflow scheduler &
+        exec airflow webserver
+    depends_on:
+      mlflow:
+        condition: service_healthy
     networks:
       - fraud-net
 
