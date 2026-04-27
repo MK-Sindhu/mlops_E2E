@@ -3,6 +3,7 @@ Security Module
 Encrypt and decrypt sensitive data at rest using Fernet (symmetric encryption).
 Guideline: All sensitive data must be encrypted at rest and in transit.
 """
+
 import os
 import logging
 from cryptography.fernet import Fernet
@@ -30,7 +31,9 @@ def load_key(key_path: str = "configs/.encryption_key") -> bytes:
         return f.read()
 
 
-def encrypt_file(input_path: str, output_path: str, key_path: str = "configs/.encryption_key"):
+def encrypt_file(
+    input_path: str, output_path: str, key_path: str = "configs/.encryption_key"
+):
     """Encrypt a file at rest."""
     key = load_key(key_path)
     fernet = Fernet(key)
@@ -46,7 +49,9 @@ def encrypt_file(input_path: str, output_path: str, key_path: str = "configs/.en
     logger.info(f"Encrypted {input_path} -> {output_path}")
 
 
-def decrypt_file(input_path: str, output_path: str, key_path: str = "configs/.encryption_key"):
+def decrypt_file(
+    input_path: str, output_path: str, key_path: str = "configs/.encryption_key"
+):
     """Decrypt an encrypted file."""
     key = load_key(key_path)
     fernet = Fernet(key)

@@ -4,9 +4,8 @@ Uses inline HTML fixtures so the suite has no network dependency.
 A live smoke test is provided behind the ``network`` marker — run with
 ``pytest -m network`` to opt in.
 """
+
 import json
-import os
-import tempfile
 
 import pytest
 

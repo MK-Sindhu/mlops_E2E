@@ -1,5 +1,4 @@
 """Unit tests for the training builder + size metrics. Does NOT actually train."""
-import pytest
 
 from src.models.train import build_model, compute_model_size_metrics
 
@@ -85,9 +84,11 @@ def test_compute_model_size_metrics_reports_actual_bytes(tmp_path):
     json_path = tmp_path / "m.json"
     joblib_path.write_bytes(b"x" * 12345)
     json_path.write_bytes(b"y" * 6789)
-    metrics = compute_model_size_metrics({
-        "joblib": str(joblib_path),
-        "json": str(json_path),
-    })
+    metrics = compute_model_size_metrics(
+        {
+            "joblib": str(joblib_path),
+            "json": str(json_path),
+        }
+    )
     assert metrics["model_size_bytes_joblib"] == 12345
     assert metrics["model_size_bytes_json"] == 6789

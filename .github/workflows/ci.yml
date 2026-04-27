@@ -1,6 +1,19 @@
 # CI/CD Pipeline
 # Guideline: Implement CI pipelines for seamless integration of code changes,
 # automated testing, and deployment of new models.
+#
+# Jobs run in this order:
+#   lint  ──►  test  ──►  build  ──►  validate-compose
+#
+# Tests:
+#   - tests/unit/         hermetic, fast (~1s)
+#   - tests/integration/  uses FastAPI's in-process TestClient (no live stack)
+#   - tests/e2e/          excluded from CI (requires DVC-tracked data + a
+#                         loaded model from MLflow Registry; runs locally)
+#
+# Pytest's `network` marker is registered in pytest.ini and excluded by default
+# (`addopts = -m "not network"`), so the live scraper smoke test is skipped
+# automatically. No CI-specific flag needed.
 
 name: CI/CD Pipeline
 
@@ -20,8 +33,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: |
-          pip install flake8 black
+        run: pip install flake8==7.1.1 black==25.11.0
       - name: Run flake8
         run: flake8 src/ tests/ --max-line-length=120
       - name: Check formatting
@@ -36,12 +48,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short
-      - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short
+      - name: Run tests with coverage
+        # tests/unit/ + tests/integration/ in one call so coverage covers both.
+        # tests/e2e/ excluded — needs DVC-pulled X_test.csv and a registry-loaded
+        # model. Network-marked tests excluded by pytest.ini's addopts.
+        run: |
+          pytest tests/unit/ tests/integration/ \
+            --cov=src \
+            --cov-report=term \
+            --cov-report=xml \
+            -v --tb=short
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: coverage.xml
 
   # ── Build Docker Image ───────────────────────────
   build:
@@ -49,17 +74,39 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t fraud-detection-api:${{ github.sha }} .
-      - name: Tag as latest
+      - name: Build API image
+        run: docker build -t fraud-api:${{ github.sha }} -f Dockerfile .
+      - name: Build Airflow image
+        run: docker build -t fraud-airflow:${{ github.sha }} -f docker/airflow.Dockerfile .
+      - name: Tag as :latest on main
         if: github.ref == 'refs/heads/main'
-        run: docker tag fraud-detection-api:${{ github.sha }} fraud-detection-api:latest
+        run: |
+          docker tag fraud-api:${{ github.sha }}     fraud-api:latest
+          docker tag fraud-airflow:${{ github.sha }} fraud-airflow:latest
 
-  # ── Docker Compose Validation ────────────────────
+  # ── Compose-File Validation ──────────────────────
   validate-compose:
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - name: Validate docker-compose
+      - name: Seed placeholder secrets
+        # docker compose config doesn't check that file:-sourced secrets exist,
+        # but seeding placeholders keeps `docker compose up` parity with dev.
+        run: |
+          mkdir -p secrets
+          cp secrets.example/airflow_admin_password \
+             secrets.example/grafana_admin_password \
+             secrets.example/mailtrap_smtp_password \
+             secrets/
+      - name: Validate base compose file
         run: docker compose config --quiet
+      - name: Validate Swarm overlay merges cleanly
+        # `docker compose config` rejects container_name + replicas>1 even for
+        # syntax validation, but `docker stack deploy` only warns (and is what
+        # we actually use). `docker stack config` is the Swarm-aware validator.
+        run: |
+          docker stack config \
+            --compose-file docker-compose.yml \
+            --compose-file docker-compose.swarm.yml \
+            > /dev/null

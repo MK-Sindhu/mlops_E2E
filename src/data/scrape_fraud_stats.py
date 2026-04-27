@@ -13,6 +13,7 @@ Sources:
 
 Output: data/external/fraud_stats.json
 """
+
 import json
 import logging
 import os
@@ -36,13 +37,18 @@ RETRY_DELAY_S = 2
 
 # Section headings to skip when listing Wikipedia article sections
 WIKI_META_SECTIONS = {
-    "Contents", "References", "External links", "See also",
-    "Notes", "Further reading", "Bibliography",
+    "Contents",
+    "References",
+    "External links",
+    "See also",
+    "Notes",
+    "Further reading",
+    "Bibliography",
 }
 
 SOURCES = {
     "wikipedia_credit_card_fraud": "https://en.wikipedia.org/wiki/Credit_card_fraud",
-    "kaggle_creditcard_dataset":   "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
+    "kaggle_creditcard_dataset": "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
 }
 
 
@@ -153,7 +159,7 @@ def parse_kaggle(html: str, url: str) -> Dict:
 
 PARSERS = {
     "wikipedia_credit_card_fraud": parse_wikipedia,
-    "kaggle_creditcard_dataset":   parse_kaggle,
+    "kaggle_creditcard_dataset": parse_kaggle,
 }
 
 

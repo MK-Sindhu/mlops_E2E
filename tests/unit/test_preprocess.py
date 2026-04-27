@@ -3,6 +3,7 @@
 Coverage focus: cleaning correctness, scaler-leakage prevention, and
 stratified-split integrity.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -86,24 +87,30 @@ class TestScaleFeatures:
     def test_fit_uses_training_statistics(self, config):
         """Scaler.mean_ must match the training data's mean — proves no extra rows leak in."""
         rng = np.random.default_rng(0)
-        train = pd.DataFrame({
-            "Amount": rng.standard_normal(200) * 50 + 100,
-            "V1": rng.standard_normal(200),
-        })
+        train = pd.DataFrame(
+            {
+                "Amount": rng.standard_normal(200) * 50 + 100,
+                "V1": rng.standard_normal(200),
+            }
+        )
         _, scaler = scale_features(train, config, fit=True)
         assert np.isclose(scaler.mean_[0], train["Amount"].mean())
 
     def test_inference_reuses_fitted_scaler(self, config):
         """When fit=False, the same scaler instance is returned."""
         rng = np.random.default_rng(0)
-        train = pd.DataFrame({
-            "Amount": rng.standard_normal(100) * 50 + 100,
-            "V1": rng.standard_normal(100),
-        })
-        test = pd.DataFrame({
-            "Amount": rng.standard_normal(40) * 50 + 100,
-            "V1": rng.standard_normal(40),
-        })
+        train = pd.DataFrame(
+            {
+                "Amount": rng.standard_normal(100) * 50 + 100,
+                "V1": rng.standard_normal(100),
+            }
+        )
+        test = pd.DataFrame(
+            {
+                "Amount": rng.standard_normal(40) * 50 + 100,
+                "V1": rng.standard_normal(40),
+            }
+        )
         _, scaler = scale_features(train, config, fit=True)
         _, scaler2 = scale_features(test, config, fit=False, scaler=scaler)
         assert scaler2 is scaler

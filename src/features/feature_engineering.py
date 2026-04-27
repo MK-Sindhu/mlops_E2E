@@ -4,6 +4,7 @@ Creates new features and computes drift baselines.
 Guideline: Version feature engineering logic separately from model logic.
 Guideline: Calculate statistical baselines during EDA for drift detection.
 """
+
 import hashlib
 import json
 import logging
@@ -27,13 +28,13 @@ BASELINE_SCHEMA_VERSION = "1.0.0"
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create new features from existing ones.
-    
+
     This module is versioned independently from the model,
     so changes here can be tracked separately.
-    
+
     Args:
         df: DataFrame with preprocessed data (no target column).
-    
+
     Returns:
         DataFrame with additional engineered features.
     """

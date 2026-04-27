@@ -57,3 +57,8 @@ reports/experiment_comparison.json
 
 # Notebook checkpoints
 .ipynb_checkpoints/
+
+# pytest-cov outputs
+.coverage
+coverage.xml
+htmlcov/

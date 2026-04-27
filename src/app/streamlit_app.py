@@ -2,6 +2,7 @@
 Streamlit Demo UI — Credit Card Fraud Detection
 Interactive web UI for making predictions, viewing stats, and monitoring.
 """
+
 import json
 import os
 import sys
@@ -45,7 +46,9 @@ api_healthy = check_api()
 if api_healthy:
     st.sidebar.success("API: Connected")
 else:
-    st.sidebar.error("API: Not running. Start with `uvicorn src.api.app:app --port 8000`")
+    st.sidebar.error(
+        "API: Not running. Start with `uvicorn src.api.app:app --port 8000`"
+    )
 
 
 def show_explanation(txn_id, top_k=8):
@@ -89,21 +92,29 @@ if page == "Predict":
 
             if st.button("Predict (CSV)"):
                 from src.features.feature_engineering import engineer_features
+
                 if "Class" in df.columns:
                     df = df.drop(columns=["Class"])
                 if "Time" in df.columns:
                     df = df.drop(columns=["Time"])
                 df_feat = engineer_features(df)
                 features = df_feat.values[0].tolist()
-                resp = requests.post(f"{API_URL}/predict", json={
-                    "features": features,
-                    "transaction_id": f"ui_{int(pd.Timestamp.now().timestamp())}"
-                })
+                resp = requests.post(
+                    f"{API_URL}/predict",
+                    json={
+                        "features": features,
+                        "transaction_id": f"ui_{int(pd.Timestamp.now().timestamp())}",
+                    },
+                )
                 result = resp.json()
                 if result["prediction"] == 1:
-                    st.error(f"🚨 FRAUD DETECTED (probability: {result['fraud_probability']:.4f})")
+                    st.error(
+                        f"🚨 FRAUD DETECTED (probability: {result['fraud_probability']:.4f})"
+                    )
                 else:
-                    st.success(f"✅ Legitimate (probability: {result['fraud_probability']:.4f})")
+                    st.success(
+                        f"✅ Legitimate (probability: {result['fraud_probability']:.4f})"
+                    )
                 st.json(result)
                 show_explanation(result["transaction_id"])
 
@@ -112,15 +123,16 @@ if page == "Predict":
         if st.button("Generate & Predict Random Sample") and api_healthy:
             X_test = pd.read_csv("data/processed/X_test.csv")
             from src.features.feature_engineering import engineer_features
+
             idx = np.random.randint(0, len(X_test))
             sample = X_test.iloc[idx]
             sample_feat = engineer_features(pd.DataFrame([sample]))
             features = sample_feat.values[0].tolist()
 
-            resp = requests.post(f"{API_URL}/predict", json={
-                "features": features,
-                "transaction_id": f"ui_random_{idx}"
-            })
+            resp = requests.post(
+                f"{API_URL}/predict",
+                json={"features": features, "transaction_id": f"ui_random_{idx}"},
+            )
             result = resp.json()
 
             if result["prediction"] == 1:
@@ -145,6 +157,7 @@ elif page == "Batch Predict":
 
         if st.button("Run Batch Prediction"):
             from src.features.feature_engineering import engineer_features
+
             if "Class" in df.columns:
                 actual_labels = df["Class"].tolist()
                 df = df.drop(columns=["Class"])
@@ -159,10 +172,10 @@ elif page == "Batch Predict":
 
             for i in range(len(df_feat)):
                 features = df_feat.iloc[i].tolist()
-                resp = requests.post(f"{API_URL}/predict", json={
-                    "features": features,
-                    "transaction_id": f"batch_{i}"
-                })
+                resp = requests.post(
+                    f"{API_URL}/predict",
+                    json={"features": features, "transaction_id": f"batch_{i}"},
+                )
                 results.append(resp.json())
                 progress.progress((i + 1) / len(df_feat))
 
@@ -179,16 +192,22 @@ elif page == "Batch Predict":
 # ── Page: Feedback ───────────────────────────────────────────────────
 elif page == "Feedback":
     st.header("Submit Feedback (Ground Truth)")
-    st.markdown("Provide the actual label for a past prediction to track model accuracy.")
+    st.markdown(
+        "Provide the actual label for a past prediction to track model accuracy."
+    )
 
     txn_id = st.text_input("Transaction ID", placeholder="e.g. ui_random_42")
-    actual = st.selectbox("Actual Label", [0, 1], format_func=lambda x: "Legit (0)" if x == 0 else "Fraud (1)")
+    actual = st.selectbox(
+        "Actual Label",
+        [0, 1],
+        format_func=lambda x: "Legit (0)" if x == 0 else "Fraud (1)",
+    )
 
     if st.button("Submit Feedback") and api_healthy:
-        resp = requests.post(f"{API_URL}/feedback", json={
-            "transaction_id": txn_id,
-            "actual_label": actual
-        })
+        resp = requests.post(
+            f"{API_URL}/feedback",
+            json={"transaction_id": txn_id, "actual_label": actual},
+        )
         if resp.status_code == 200:
             st.success(resp.json()["message"])
             if resp.json().get("current_accuracy"):
@@ -269,7 +288,8 @@ elif page == "Threat Landscape":
 # ── Page: About ──────────────────────────────────────────────────────
 elif page == "About":
     st.header("About This Project")
-    st.markdown("""
+    st.markdown(
+        """
     ### Credit Card Fraud Detection — MLOps Pipeline
 
     **Model:** XGBoost classifier trained on 284,807 transactions
@@ -288,4 +308,5 @@ elif page == "About":
     Airflow, Streamlit, SQLite, AlertManager
 
     **Pipeline:** `dvc repro` runs validate → preprocess → feature_engineering → train → evaluate
-    """)
+    """
+    )

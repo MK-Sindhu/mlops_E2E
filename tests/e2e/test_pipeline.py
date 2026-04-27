@@ -4,6 +4,7 @@ End-to-End Tests — full predict → explain → feedback → stats pipeline.
 Skips gracefully if no model is loaded (e.g. CI without registry access).
 Guideline: Implement unit, integration, and end-to-end tests.
 """
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ def client():
 def _real_features() -> list:
     """Engineered feature row from X_test for use as request input."""
     from src.features.feature_engineering import engineer_features
+
     df = pd.read_csv("data/processed/X_test.csv").head(1)
     return engineer_features(df).iloc[0].tolist()
 
@@ -34,28 +36,37 @@ class TestEndToEndPipeline:
         features = _real_features()
 
         # 1. Predict
-        pred = client.post("/predict", json={
-            "features": features,
-            "transaction_id": "e2e_full_001",
-        })
+        pred = client.post(
+            "/predict",
+            json={
+                "features": features,
+                "transaction_id": "e2e_full_001",
+            },
+        )
         assert pred.status_code == 200
         pred_data = pred.json()
         assert pred_data["prediction"] in (0, 1)
         assert pred_data["latency_ms"] < 200, "Inference latency exceeded business SLA"
 
         # 2. Explain
-        exp = client.get("/explain", params={
-            "transaction_id": "e2e_full_001",
-            "top_k": 5,
-        })
+        exp = client.get(
+            "/explain",
+            params={
+                "transaction_id": "e2e_full_001",
+                "top_k": 5,
+            },
+        )
         assert exp.status_code == 200
         assert len(exp.json()["top_contributions"]) == 5
 
         # 3. Feedback
-        fb = client.post("/feedback", json={
-            "transaction_id": "e2e_full_001",
-            "actual_label": pred_data["prediction"],
-        })
+        fb = client.post(
+            "/feedback",
+            json={
+                "transaction_id": "e2e_full_001",
+                "actual_label": pred_data["prediction"],
+            },
+        )
         assert fb.status_code == 200
         assert fb.json()["total_feedback"] >= 1
 

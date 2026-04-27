@@ -3,11 +3,11 @@ Database Module — SQLite for persistent storage.
 Stores predictions and feedback for the feedback loop.
 Guideline: Persist pipeline state and metadata.
 """
+
 import os
 import sqlite3
 import logging
-from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +28,8 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id TEXT UNIQUE NOT NULL,
@@ -38,9 +39,11 @@ def init_db():
             features TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS feedback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id TEXT NOT NULL,
@@ -50,9 +53,11 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (transaction_id) REFERENCES predictions(transaction_id)
         )
-    """)
+    """
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS drift_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             drift_detected INTEGER NOT NULL,
@@ -61,23 +66,28 @@ def init_db():
             report_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {DB_PATH}")
 
 
-def save_prediction(transaction_id: str, prediction: int,
-                    fraud_probability: float, latency_ms: float,
-                    features: str = None):
+def save_prediction(
+    transaction_id: str,
+    prediction: int,
+    fraud_probability: float,
+    latency_ms: float,
+    features: str = None,
+):
     """Store a prediction."""
     conn = get_connection()
     conn.execute(
         """INSERT OR REPLACE INTO predictions
            (transaction_id, prediction, fraud_probability, latency_ms, features)
            VALUES (?, ?, ?, ?, ?)""",
-        (transaction_id, prediction, fraud_probability, latency_ms, features)
+        (transaction_id, prediction, fraud_probability, latency_ms, features),
     )
     conn.commit()
     conn.close()
@@ -87,8 +97,7 @@ def get_prediction(transaction_id: str) -> Optional[Dict]:
     """Retrieve a prediction by transaction ID."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM predictions WHERE transaction_id = ?",
-        (transaction_id,)
+        "SELECT * FROM predictions WHERE transaction_id = ?", (transaction_id,)
     ).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -101,7 +110,7 @@ def save_feedback(transaction_id: str, predicted: int, actual: int):
         """INSERT INTO feedback
            (transaction_id, predicted_label, actual_label, is_correct)
            VALUES (?, ?, ?, ?)""",
-        (transaction_id, predicted, actual, int(predicted == actual))
+        (transaction_id, predicted, actual, int(predicted == actual)),
     )
     conn.commit()
     conn.close()
@@ -111,8 +120,7 @@ def get_model_accuracy(window: int = 100) -> Optional[float]:
     """Calculate accuracy from recent feedback."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT is_correct FROM feedback ORDER BY id DESC LIMIT ?",
-        (window,)
+        "SELECT is_correct FROM feedback ORDER BY id DESC LIMIT ?", (window,)
     ).fetchall()
     conn.close()
 
@@ -133,7 +141,9 @@ def get_prediction_stats() -> Dict:
     """Get prediction statistics."""
     conn = get_connection()
     total = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-    fraud = conn.execute("SELECT COUNT(*) FROM predictions WHERE prediction = 1").fetchone()[0]
+    fraud = conn.execute(
+        "SELECT COUNT(*) FROM predictions WHERE prediction = 1"
+    ).fetchone()[0]
     avg_latency = conn.execute("SELECT AVG(latency_ms) FROM predictions").fetchone()[0]
     conn.close()
     return {
@@ -145,15 +155,16 @@ def get_prediction_stats() -> Dict:
     }
 
 
-def save_drift_report(drift_detected: bool, drifted_count: int,
-                      drifted_features: str, report_json: str):
+def save_drift_report(
+    drift_detected: bool, drifted_count: int, drifted_features: str, report_json: str
+):
     """Store drift detection report."""
     conn = get_connection()
     conn.execute(
         """INSERT INTO drift_reports
            (drift_detected, drifted_features_count, drifted_features, report_json)
            VALUES (?, ?, ?, ?)""",
-        (int(drift_detected), drifted_count, drifted_features, report_json)
+        (int(drift_detected), drifted_count, drifted_features, report_json),
     )
     conn.commit()
     conn.close()

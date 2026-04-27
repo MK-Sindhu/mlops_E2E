@@ -13,6 +13,7 @@ Endpoints:
 Model is loaded from the MLflow Registry at startup, with a local-file
 fallback. Feedback + predictions persist in SQLite for the feedback loop.
 """
+
 import json
 import logging
 import os
@@ -46,11 +47,11 @@ logger = logging.getLogger(__name__)
 
 # ── Global State ─────────────────────────────────────────────────────
 model = None
-model_source = "unloaded"   # "registry: ..." or "file: ..."
-model_version = None        # MLflow registry version, when loaded from registry
+model_source = "unloaded"  # "registry: ..." or "file: ..."
+model_version = None  # MLflow registry version, when loaded from registry
 feature_names = None
 scaler = None
-explainer = None            # SHAP TreeExplainer, lazy-init on first /explain
+explainer = None  # SHAP TreeExplainer, lazy-init on first /explain
 prediction_counter = {"fraud": 0, "legit": 0}
 
 
@@ -59,6 +60,7 @@ def _get_explainer():
     global explainer
     if explainer is None and model is not None:
         import shap
+
         explainer = shap.TreeExplainer(model)
     return explainer
 
@@ -129,7 +131,8 @@ async def lifespan(_app: FastAPI):
 
     try:
         model, model_version, run_id = _load_model_from_registry(
-            registered_name, model_stage,
+            registered_name,
+            model_stage,
         )
         model_source = (
             f"registry: {registered_name}/{model_stage} "
@@ -166,7 +169,7 @@ async def lifespan(_app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not load scaler: {e}")
 
-    yield   # ← app is running
+    yield  # ← app is running
 
     # Shutdown — currently nothing to clean up
 
@@ -249,7 +252,11 @@ def predict(request: PredictionRequest):
                 detail=f"Expected {len(feature_names)} features, got {features_array.shape[1]}",
             )
 
-        df = pd.DataFrame(features_array, columns=feature_names) if feature_names else pd.DataFrame(features_array)
+        df = (
+            pd.DataFrame(features_array, columns=feature_names)
+            if feature_names
+            else pd.DataFrame(features_array)
+        )
         prediction = int(model.predict(df)[0])
         probability = float(model.predict_proba(df)[0][1])
 
@@ -261,8 +268,9 @@ def predict(request: PredictionRequest):
     latency_ms = (time.time() - start_time) * 1000
     txn_id = request.transaction_id or f"txn_{int(time.time() * 1000)}"
 
-    save_prediction(txn_id, prediction, probability, latency_ms,
-                    json.dumps(request.features))
+    save_prediction(
+        txn_id, prediction, probability, latency_ms, json.dumps(request.features)
+    )
 
     label = "fraud" if prediction == 1 else "legit"
     PREDICTION_COUNT.labels(result=label).inc()
@@ -350,7 +358,9 @@ def explain_prediction(transaction_id: str, top_k: int = 10):
     # Newer XGBoost binary classifiers return a 2-D array (n, n_features);
     # older versions returned a list per class. Normalise to a 1-D row.
     if isinstance(shap_values, list):
-        shap_row = np.asarray(shap_values[1] if len(shap_values) > 1 else shap_values[0])[0]
+        shap_row = np.asarray(
+            shap_values[1] if len(shap_values) > 1 else shap_values[0]
+        )[0]
     else:
         arr = np.asarray(shap_values)
         shap_row = arr[0] if arr.ndim == 2 else arr
@@ -393,4 +403,5 @@ def metrics():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -3,10 +3,10 @@ Data Preprocessing Module
 Handles cleaning, transformation, and train/test splitting.
 Guideline: Clean and transform the data. Handle missing values, outliers, and inconsistencies.
 """
+
 import os
 import logging
 import pandas as pd
-import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -24,11 +24,11 @@ def load_config(config_path: str = "configs/config.yaml") -> dict:
 def clean_data(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """
     Clean raw data: drop unnecessary columns, handle missing values.
-    
+
     Args:
         df: Raw DataFrame.
         config: Project configuration.
-    
+
     Returns:
         Cleaned DataFrame.
     """
@@ -60,13 +60,13 @@ def clean_data(df: pd.DataFrame, config: dict) -> pd.DataFrame:
 def scale_features(df: pd.DataFrame, config: dict, fit: bool = True, scaler=None):
     """
     Scale specified columns using StandardScaler.
-    
+
     Args:
         df: DataFrame to scale.
         config: Project configuration.
         fit: Whether to fit the scaler (True for training, False for inference).
         scaler: Pre-fitted scaler (used when fit=False).
-    
+
     Returns:
         Tuple of (scaled DataFrame, fitted scaler).
     """
@@ -89,7 +89,7 @@ def scale_features(df: pd.DataFrame, config: dict, fit: bool = True, scaler=None
 def split_data(df: pd.DataFrame, config: dict):
     """
     Split data into train and test sets.
-    
+
     Returns:
         Tuple of (X_train, X_test, y_train, y_test).
     """
@@ -98,10 +98,11 @@ def split_data(df: pd.DataFrame, config: dict):
     y = df[target_col]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
+        X,
+        y,
         test_size=config["data"]["test_size"],
         random_state=config["data"]["random_state"],
-        stratify=y  # Maintain fraud ratio in both splits
+        stratify=y,  # Maintain fraud ratio in both splits
     )
 
     logger.info(f"Train set: {len(X_train)} samples (fraud: {y_train.mean():.4f})")

@@ -8,7 +8,6 @@ need real predictions will skip gracefully if no model is available
 
 Guideline: Implement unit, integration, and end-to-end tests.
 """
-import os
 
 import pandas as pd
 import pytest
@@ -28,6 +27,7 @@ def _real_features() -> list:
     """One real engineered feature row from X_test, or zeros as a fallback."""
     try:
         from src.features.feature_engineering import engineer_features
+
         df = pd.read_csv("data/processed/X_test.csv").head(1)
         return engineer_features(df).iloc[0].tolist()
     except Exception:
@@ -57,6 +57,7 @@ class TestHealthEndpoints:
     def test_ready_without_model(self, client):
         """Manually setting model to None should make /ready return 503."""
         from src.api import app as app_module
+
         original_model = app_module.model
         app_module.model = None
         try:
@@ -73,10 +74,13 @@ class TestPredictEndpoint:
 
     def test_predict_happy_path(self, client):
         """Real input → 200 with a valid prediction payload."""
-        response = client.post("/predict", json={
-            "features": _real_features(),
-            "transaction_id": "test_predict_happy",
-        })
+        response = client.post(
+            "/predict",
+            json={
+                "features": _real_features(),
+                "transaction_id": "test_predict_happy",
+            },
+        )
         if response.status_code != 200:
             pytest.skip(f"Model not loaded (status {response.status_code})")
         data = response.json()
@@ -87,20 +91,26 @@ class TestPredictEndpoint:
 
     def test_predict_latency_under_business_budget(self, client):
         """Single-row inference must stay under the 200 ms business SLA."""
-        response = client.post("/predict", json={
-            "features": _real_features(),
-            "transaction_id": "test_predict_latency",
-        })
+        response = client.post(
+            "/predict",
+            json={
+                "features": _real_features(),
+                "transaction_id": "test_predict_latency",
+            },
+        )
         if response.status_code != 200:
             pytest.skip(f"Model not loaded (status {response.status_code})")
         assert response.json()["latency_ms"] < 200
 
     def test_predict_invalid_features(self, client):
         """Wrong feature count → 400/500/503 depending on model state."""
-        response = client.post("/predict", json={
-            "features": [1.0, 2.0],
-            "transaction_id": "test_predict_invalid",
-        })
+        response = client.post(
+            "/predict",
+            json={
+                "features": [1.0, 2.0],
+                "transaction_id": "test_predict_invalid",
+            },
+        )
         assert response.status_code in (400, 500, 503)
 
 
@@ -110,25 +120,34 @@ class TestPredictEndpoint:
 class TestFeedbackEndpoint:
 
     def test_feedback_unknown_transaction(self, client):
-        response = client.post("/feedback", json={
-            "transaction_id": "definitely_does_not_exist_xyz",
-            "actual_label": 0,
-        })
+        response = client.post(
+            "/feedback",
+            json={
+                "transaction_id": "definitely_does_not_exist_xyz",
+                "actual_label": 0,
+            },
+        )
         assert response.status_code == 404
 
     def test_predict_then_feedback(self, client):
         """End-to-end: predict, then post feedback referencing that prediction."""
-        pred = client.post("/predict", json={
-            "features": _real_features(),
-            "transaction_id": "test_feedback_flow",
-        })
+        pred = client.post(
+            "/predict",
+            json={
+                "features": _real_features(),
+                "transaction_id": "test_feedback_flow",
+            },
+        )
         if pred.status_code != 200:
             pytest.skip(f"Model not loaded (status {pred.status_code})")
 
-        fb = client.post("/feedback", json={
-            "transaction_id": "test_feedback_flow",
-            "actual_label": pred.json()["prediction"],
-        })
+        fb = client.post(
+            "/feedback",
+            json={
+                "transaction_id": "test_feedback_flow",
+                "actual_label": pred.json()["prediction"],
+            },
+        )
         assert fb.status_code == 200
         data = fb.json()
         assert data["total_feedback"] >= 1
@@ -140,22 +159,30 @@ class TestFeedbackEndpoint:
 class TestExplainEndpoint:
 
     def test_explain_unknown_transaction(self, client):
-        response = client.get("/explain", params={"transaction_id": "nonexistent_explain"})
+        response = client.get(
+            "/explain", params={"transaction_id": "nonexistent_explain"}
+        )
         assert response.status_code in (404, 503)
 
     def test_explain_happy_path(self, client):
         """Predict first, then ask for the SHAP explanation."""
-        pred = client.post("/predict", json={
-            "features": _real_features(),
-            "transaction_id": "test_explain_happy",
-        })
+        pred = client.post(
+            "/predict",
+            json={
+                "features": _real_features(),
+                "transaction_id": "test_explain_happy",
+            },
+        )
         if pred.status_code != 200:
             pytest.skip(f"Model not loaded (status {pred.status_code})")
 
-        exp = client.get("/explain", params={
-            "transaction_id": "test_explain_happy",
-            "top_k": 5,
-        })
+        exp = client.get(
+            "/explain",
+            params={
+                "transaction_id": "test_explain_happy",
+                "top_k": 5,
+            },
+        )
         assert exp.status_code == 200
         data = exp.json()
         assert data["transaction_id"] == "test_explain_happy"

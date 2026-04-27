@@ -3,6 +3,7 @@ Data Ingestion Module
 Downloads and loads the credit card fraud dataset.
 Guideline: Version-control data-collection scripts and configurations.
 """
+
 import os
 import logging
 import pandas as pd
@@ -21,14 +22,14 @@ def load_config(config_path: str = "configs/config.yaml") -> dict:
 def load_raw_data(data_path: str) -> pd.DataFrame:
     """
     Load raw credit card transaction data.
-    
+
     The dataset should be downloaded from:
     https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
     and placed in data/raw/creditcard.csv
-    
+
     Args:
         data_path: Path to the raw CSV file.
-    
+
     Returns:
         DataFrame with raw transaction data.
     """
@@ -39,7 +40,7 @@ def load_raw_data(data_path: str) -> pd.DataFrame:
             "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud "
             "and place it in data/raw/creditcard.csv"
         )
-    
+
     logger.info(f"Loading raw data from {data_path}")
     df = pd.read_csv(data_path)
     logger.info(f"Loaded {len(df)} rows and {len(df.columns)} columns")

@@ -3,9 +3,9 @@ Data Validation Module
 Automated checks for schema consistency, missing values, and data quality.
 Guideline: Implement automated checks for schema consistency and missing values during ingestion.
 """
+
 import logging
 import pandas as pd
-import numpy as np
 from typing import Dict, List, Tuple
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +26,7 @@ EXPECTED_COLUMNS = list(EXPECTED_SCHEMA.keys())
 
 class DataValidationError(Exception):
     """Raised when data validation fails."""
+
     pass
 
 
@@ -63,7 +64,9 @@ def validate_missing_values(df: pd.DataFrame) -> Tuple[bool, Dict[str, float]]:
     return not has_missing, {k: v for k, v in missing_pct.items() if v > 0}
 
 
-def validate_target_column(df: pd.DataFrame, target_col: str = "Class") -> Tuple[bool, str]:
+def validate_target_column(
+    df: pd.DataFrame, target_col: str = "Class"
+) -> Tuple[bool, str]:
     """Validate the target column has expected values (0 and 1)."""
     unique_vals = set(df[target_col].unique())
     expected_vals = {0, 1}

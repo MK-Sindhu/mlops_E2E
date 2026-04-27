@@ -4,43 +4,45 @@ Compares incoming data distribution against training baselines using KS-test.
 Guideline: Monitor for changes in input data distribution.
 Guideline: Configure alerts if data drift is detected.
 """
+
 import json
 import logging
-import numpy as np
 import pandas as pd
 from scipy import stats
-from typing import Dict, List, Tuple
+from typing import Dict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_baselines(baselines_path: str = "data/baselines/feature_baselines.json") -> Dict:
+def load_baselines(
+    baselines_path: str = "data/baselines/feature_baselines.json",
+) -> Dict:
     """Load the per-feature baseline statistics dict."""
     with open(baselines_path, "r") as f:
         return json.load(f)["features"]
 
 
-def load_baseline_meta(baselines_path: str = "data/baselines/feature_baselines.json") -> Dict:
+def load_baseline_meta(
+    baselines_path: str = "data/baselines/feature_baselines.json",
+) -> Dict:
     """Load baseline provenance metadata (feature_version, source_data_md5, etc.)."""
     with open(baselines_path, "r") as f:
         return json.load(f)["_meta"]
 
 
 def detect_drift_ks_test(
-    reference_data: pd.DataFrame,
-    current_data: pd.DataFrame,
-    threshold: float = 0.05
+    reference_data: pd.DataFrame, current_data: pd.DataFrame, threshold: float = 0.05
 ) -> Dict:
     """
     Detect data drift using the Kolmogorov-Smirnov test.
     Compares distributions of each feature between reference and current data.
-    
+
     Args:
         reference_data: Training data (or a sample of it).
         current_data: New incoming data.
         threshold: p-value threshold; below this means drift detected.
-    
+
     Returns:
         Dictionary with drift results per feature.
     """
@@ -51,8 +53,7 @@ def detect_drift_ks_test(
 
     for col in common_cols:
         ks_stat, p_value = stats.ks_2samp(
-            reference_data[col].dropna(),
-            current_data[col].dropna()
+            reference_data[col].dropna(), current_data[col].dropna()
         )
         # Cast scipy / numpy scalars to plain Python types so the report
         # is JSON-serialisable end-to-end (callers persist it via json.dumps).
@@ -74,7 +75,9 @@ def detect_drift_ks_test(
     }
 
     if drifted_features:
-        logger.warning(f"DRIFT DETECTED in {len(drifted_features)} features: {drifted_features}")
+        logger.warning(
+            f"DRIFT DETECTED in {len(drifted_features)} features: {drifted_features}"
+        )
     else:
         logger.info("No drift detected.")
 
@@ -82,20 +85,18 @@ def detect_drift_ks_test(
 
 
 def detect_drift_from_baselines(
-    current_data: pd.DataFrame,
-    baselines: Dict,
-    z_threshold: float = 3.0
+    current_data: pd.DataFrame, baselines: Dict, z_threshold: float = 3.0
 ) -> Dict:
     """
     Quick drift check using stored baselines (mean/std).
     Flags features where current mean is more than z_threshold standard deviations
     away from the training mean.
-    
+
     Args:
         current_data: New incoming data.
         baselines: Stored baselines from training.
         z_threshold: Number of std deviations to flag.
-    
+
     Returns:
         Dictionary with drift results.
     """

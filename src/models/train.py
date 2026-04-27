@@ -8,6 +8,7 @@ Guideline: Every experiment must be reproducible via Git commit hash + MLflow ru
 Guideline: Track model versions, hyperparameters, and performance metrics.
 Guideline: Optimize models for local hardware (quantization).
 """
+
 import json
 import logging
 import os
@@ -49,7 +50,9 @@ def get_git_commit_hash() -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
     except Exception:
         return "unknown"
@@ -93,9 +96,7 @@ def build_model(config: dict) -> XGBClassifier:
     if opt.get("quantize", False):
         kwargs["tree_method"] = "hist"
         kwargs["max_bin"] = opt.get("max_bin", 128)
-        logger.info(
-            f"Quantization ON: tree_method=hist, max_bin={kwargs['max_bin']}"
-        )
+        logger.info(f"Quantization ON: tree_method=hist, max_bin={kwargs['max_bin']}")
     else:
         logger.info("Quantization OFF: using XGBoost defaults")
 
@@ -105,7 +106,9 @@ def build_model(config: dict) -> XGBClassifier:
 # --- Evaluation --------------------------------------------------------
 
 
-def measure_inference_latency_ms(model, X_test: pd.DataFrame, n_iter: int = 100) -> float:
+def measure_inference_latency_ms(
+    model, X_test: pd.DataFrame, n_iter: int = 100
+) -> float:
     """Measure per-call single-row inference latency."""
     start = time.perf_counter()
     for _ in range(n_iter):
@@ -118,15 +121,17 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
     metrics = {
-        "f1_score":  float(f1_score(y_test, y_pred)),
+        "f1_score": float(f1_score(y_test, y_pred)),
         "precision": float(precision_score(y_test, y_pred)),
-        "recall":    float(recall_score(y_test, y_pred)),
-        "roc_auc":   float(roc_auc_score(y_test, y_proba)),
-        "pr_auc":    float(average_precision_score(y_test, y_proba)),
+        "recall": float(recall_score(y_test, y_pred)),
+        "roc_auc": float(roc_auc_score(y_test, y_proba)),
+        "pr_auc": float(average_precision_score(y_test, y_proba)),
         "avg_inference_latency_ms": measure_inference_latency_ms(model, X_test),
     }
     logger.info(f"Metrics: {json.dumps(metrics, indent=2)}")
-    logger.info(f"\n{classification_report(y_test, y_pred, target_names=['Legit', 'Fraud'])}")
+    logger.info(
+        f"\n{classification_report(y_test, y_pred, target_names=['Legit', 'Fraud'])}"
+    )
     return metrics
 
 
@@ -137,10 +142,10 @@ def save_artifacts(model, X_train: pd.DataFrame, metrics: dict) -> dict:
     """Save model + metadata to disk, return paths."""
     os.makedirs("models", exist_ok=True)
     paths = {
-        "joblib":   "models/best_model.joblib",
-        "json":     "models/best_model.json",
+        "joblib": "models/best_model.joblib",
+        "json": "models/best_model.json",
         "features": "models/feature_names.json",
-        "metrics":  "models/metrics.json",
+        "metrics": "models/metrics.json",
     }
     joblib.dump(model, paths["joblib"])
     model.save_model(paths["json"])
@@ -155,7 +160,7 @@ def compute_model_size_metrics(paths: dict) -> dict:
     """Report saved artifact sizes — visible proof quantization affects size."""
     return {
         "model_size_bytes_joblib": os.path.getsize(paths["joblib"]),
-        "model_size_bytes_json":   os.path.getsize(paths["json"]),
+        "model_size_bytes_json": os.path.getsize(paths["json"]),
     }
 
 
@@ -176,9 +181,9 @@ def train_and_log(
 
     proc = config["data"]["processed_path"]
     X_train = engineer_features(pd.read_csv(os.path.join(proc, "X_train.csv")))
-    X_test  = engineer_features(pd.read_csv(os.path.join(proc, "X_test.csv")))
+    X_test = engineer_features(pd.read_csv(os.path.join(proc, "X_test.csv")))
     y_train = pd.read_csv(os.path.join(proc, "y_train.csv")).squeeze()
-    y_test  = pd.read_csv(os.path.join(proc, "y_test.csv")).squeeze()
+    y_test = pd.read_csv(os.path.join(proc, "y_test.csv")).squeeze()
 
     logger.info(f"Train: {X_train.shape}, Test: {X_test.shape}")
 
@@ -186,11 +191,15 @@ def train_and_log(
         # Reproducibility tags
         mlflow.set_tag("git_commit_hash", get_git_commit_hash())
         mlflow.set_tag("model_type", config["model"]["algorithm"])
-        mlflow.set_tag("quantized", str(config["model"]["optimization"].get("quantize", False)))
+        mlflow.set_tag(
+            "quantized", str(config["model"]["optimization"].get("quantize", False))
+        )
 
         # Hyperparameters
         mlflow.log_params(config["model"]["params"])
-        mlflow.log_params({f"opt_{k}": v for k, v in config["model"]["optimization"].items()})
+        mlflow.log_params(
+            {f"opt_{k}": v for k, v in config["model"]["optimization"].items()}
+        )
 
         # Train
         model = build_model(config)
@@ -209,7 +218,9 @@ def train_and_log(
         registered_name = config["mlflow"].get("registered_model_name")
         if registered_name:
             mlflow.xgboost.log_model(
-                model, "model", registered_model_name=registered_name,
+                model,
+                "model",
+                registered_model_name=registered_name,
             )
             logger.info(f"Registered as '{registered_name}'")
         else:

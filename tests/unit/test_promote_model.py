@@ -3,10 +3,9 @@
 The MlflowClient is mocked so these tests don't touch a real registry or
 filesystem.
 """
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 
 # scripts/ isn't a package; load promote_model.py via importlib
 import importlib.util
@@ -64,9 +63,7 @@ def test_get_metric_returns_value_when_present():
 
 def test_get_metric_returns_none_when_missing():
     client = MagicMock()
-    client.get_run.return_value = SimpleNamespace(
-        data=SimpleNamespace(metrics={})
-    )
+    client.get_run.return_value = SimpleNamespace(data=SimpleNamespace(metrics={}))
     assert promote_model.get_metric(client, "run_x", "pr_auc") is None
 
 
@@ -105,7 +102,11 @@ def test_find_best_version_ignores_versions_missing_the_metric():
     ]
     metric_table = {"r1": None, "r2": 0.5}
     client.get_run.side_effect = lambda rid: SimpleNamespace(
-        data=SimpleNamespace(metrics={"pr_auc": metric_table[rid]} if metric_table[rid] is not None else {})
+        data=SimpleNamespace(
+            metrics=(
+                {"pr_auc": metric_table[rid]} if metric_table[rid] is not None else {}
+            )
+        )
     )
     best, score = promote_model.find_best_version(client, "m", "pr_auc")
     assert best.version == "2"
@@ -115,9 +116,7 @@ def test_find_best_version_ignores_versions_missing_the_metric():
 def test_find_best_version_returns_none_when_no_metric_found():
     client = MagicMock()
     client.search_model_versions.return_value = [_mv(1)]
-    client.get_run.return_value = SimpleNamespace(
-        data=SimpleNamespace(metrics={})
-    )
+    client.get_run.return_value = SimpleNamespace(data=SimpleNamespace(metrics={}))
     best, score = promote_model.find_best_version(client, "m", "pr_auc")
     assert best is None
     assert score == float("-inf")
