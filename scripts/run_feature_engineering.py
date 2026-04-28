@@ -18,6 +18,7 @@ baselines = compute_drift_baselines(
     X_train_feat,
     config["data"]["baselines_path"],
     source_path=X_train_path,
+    filename=config["data"].get("baselines_filename", "feature_baselines.json"),
 )
 
 print(f"Original features: {X_train.shape[1]}")

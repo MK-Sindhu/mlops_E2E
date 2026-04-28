@@ -1,0 +1,68 @@
+# MLproject — keeps dev / test / experiment environments identical.
+# Every command listed here is exactly what `dvc repro` and CI also run,
+# so `mlflow run .` reproduces a training round in a fresh venv built
+# from python_env.yaml + requirements.txt.
+#
+# Usage:
+#   mlflow run . -e validate
+#   mlflow run . -e preprocess
+#   mlflow run . -e feature_engineering
+#   mlflow run . -e train
+#   mlflow run . -e evaluate
+#   mlflow run . -e scrape
+#   mlflow run . -e full_pipeline      # runs `dvc repro` end-to-end
+#   mlflow run .                       # alias for full_pipeline (the `main` entry)
+
+name: credit-card-fraud-detection
+
+python_env: python_env.yaml
+
+entry_points:
+
+  # Stage 1 — schema / null / dup checks → data/validation_report.json
+  validate:
+    command: "python scripts/run_validate.py"
+
+  # Stage 2 — train/test split + StandardScaler (fit on train only)
+  preprocess:
+    command: "python scripts/run_preprocessing.py"
+
+  # Stage 3 — engineered features + drift baselines
+  feature_engineering:
+    command: "python scripts/run_feature_engineering.py"
+
+  # Stage 4 — XGBoost fit + MLflow logging + Registry registration.
+  # Hyperparameters live in configs/config.yaml (DVC-tracked params),
+  # not on the CLI, so train runs are reproducible from the config alone.
+  train:
+    command: "python scripts/run_training.py"
+
+  # Stage 5 — generate confusion matrix + ROC plots into reports/
+  evaluate:
+    command: "python scripts/run_evaluate.py"
+
+  # Public-data scraper for the Threat Landscape page
+  scrape:
+    command: "python scripts/run_scrape.py"
+
+  # Closed-loop check: KS-drift + accuracy → retrain decision
+  retrain:
+    command: "python scripts/check_and_retrain.py"
+
+  # Promote a registered model version to a stage alias.
+  promote:
+    parameters:
+      version: {type: int, default: -1}
+      to: {type: str, default: "Production"}
+    command: >
+      python scripts/promote_model.py promote
+      --version {version}
+      --to {to}
+
+  # Full pipeline (validate → preprocess → feature_eng → train → evaluate)
+  full_pipeline:
+    command: "dvc repro"
+
+  # `mlflow run .` (no -e) defaults to this entry point.
+  main:
+    command: "dvc repro"

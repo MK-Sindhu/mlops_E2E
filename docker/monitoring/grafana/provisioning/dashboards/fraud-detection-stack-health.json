@@ -1,0 +1,150 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "schemaVersion": 30,
+  "version": 1,
+  "uid": "fraud-detection-stack-health",
+  "title": "Fraud Detection — Stack Health",
+  "tags": ["fraud", "health", "scrape", "process"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": {"from": "now-30m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scrape targets — up{}",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 5},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "up", "legendFormat": "{{job}}", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+            {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red"}, {"color": "green", "value": 1}]}
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "orientation": "horizontal"}
+    },
+    {
+      "id": 2,
+      "title": "Scrape duration (s)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "scrape_duration_seconds", "legendFormat": "{{job}}", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 5}]}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}}
+    },
+    {
+      "id": 3,
+      "title": "Samples scraped per target",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 5, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "scrape_samples_scraped", "legendFormat": "{{job}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"]}}
+    },
+    {
+      "id": 4,
+      "title": "API process — resident memory",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 13, "w": 8, "h": 7},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "process_resident_memory_bytes{job=\"fraud-detection-api\"}", "legendFormat": "RSS", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 5,
+      "title": "API process — virtual memory",
+      "type": "timeseries",
+      "gridPos": {"x": 8, "y": 13, "w": 8, "h": 7},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "process_virtual_memory_bytes{job=\"fraud-detection-api\"}", "legendFormat": "VSZ", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 6,
+      "title": "API process — CPU time used",
+      "type": "timeseries",
+      "gridPos": {"x": 16, "y": 13, "w": 8, "h": 7},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "rate(process_cpu_seconds_total{job=\"fraud-detection-api\"}[1m])",
+         "legendFormat": "CPU s/s", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 7,
+      "title": "API open file descriptors",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 7},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "process_open_fds{job=\"fraud-detection-api\"}", "legendFormat": "open fds", "refId": "A"},
+        {"expr": "process_max_fds{job=\"fraud-detection-api\"}",  "legendFormat": "max fds",  "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 8,
+      "title": "Python GC — collections per generation",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 7},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "rate(python_gc_collections_total{job=\"fraud-detection-api\"}[5m])",
+         "legendFormat": "gen {{generation}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean"]}}
+    },
+    {
+      "id": 9,
+      "title": "API uptime",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 27, "w": 8, "h": 5},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "time() - process_start_time_seconds{job=\"fraud-detection-api\"}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value"}
+    },
+    {
+      "id": 10,
+      "title": "API network bytes",
+      "type": "timeseries",
+      "gridPos": {"x": 8, "y": 27, "w": 16, "h": 5},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "rate(process_network_receive_bytes_total{job=\"fraud-detection-api\"}[1m])",
+         "legendFormat": "rx", "refId": "A"},
+        {"expr": "rate(process_network_transmit_bytes_total{job=\"fraud-detection-api\"}[1m])",
+         "legendFormat": "tx", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    }
+  ]
+}

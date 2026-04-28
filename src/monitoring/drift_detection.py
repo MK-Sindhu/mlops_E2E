@@ -3,36 +3,69 @@ Data Drift Detection Module
 Compares incoming data distribution against training baselines using KS-test.
 Guideline: Monitor for changes in input data distribution.
 Guideline: Configure alerts if data drift is detected.
+
+Defaults (baselines path, KS p-value threshold, z-score threshold) come from
+``configs/config.yaml`` so callers don't have to thread config explicitly.
 """
 
 import json
 import logging
+import os
+from typing import Dict, Optional
+
 import pandas as pd
+import yaml
 from scipy import stats
-from typing import Dict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_CONFIG_PATH = "configs/config.yaml"
 
-def load_baselines(
-    baselines_path: str = "data/baselines/feature_baselines.json",
-) -> Dict:
+
+def _load_config() -> dict:
+    """Read configs/config.yaml; returns {} if file is missing."""
+    if not os.path.exists(_CONFIG_PATH):
+        return {}
+    with open(_CONFIG_PATH, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _default_baselines_path() -> str:
+    """Compose ``data.baselines_path`` + ``data.baselines_filename`` from config."""
+    cfg = _load_config()
+    data = cfg.get("data", {}) or {}
+    base = data.get("baselines_path", "data/baselines/")
+    name = data.get("baselines_filename", "feature_baselines.json")
+    return os.path.join(base, name)
+
+
+def _default_drift_threshold() -> float:
+    return float(_load_config().get("monitoring", {}).get("drift_threshold", 0.05))
+
+
+def _default_z_threshold() -> float:
+    return float(_load_config().get("monitoring", {}).get("drift_z_threshold", 3.0))
+
+
+def load_baselines(baselines_path: Optional[str] = None) -> Dict:
     """Load the per-feature baseline statistics dict."""
-    with open(baselines_path, "r") as f:
+    path = baselines_path or _default_baselines_path()
+    with open(path, "r") as f:
         return json.load(f)["features"]
 
 
-def load_baseline_meta(
-    baselines_path: str = "data/baselines/feature_baselines.json",
-) -> Dict:
+def load_baseline_meta(baselines_path: Optional[str] = None) -> Dict:
     """Load baseline provenance metadata (feature_version, source_data_md5, etc.)."""
-    with open(baselines_path, "r") as f:
+    path = baselines_path or _default_baselines_path()
+    with open(path, "r") as f:
         return json.load(f)["_meta"]
 
 
 def detect_drift_ks_test(
-    reference_data: pd.DataFrame, current_data: pd.DataFrame, threshold: float = 0.05
+    reference_data: pd.DataFrame,
+    current_data: pd.DataFrame,
+    threshold: Optional[float] = None,
 ) -> Dict:
     """
     Detect data drift using the Kolmogorov-Smirnov test.
@@ -46,6 +79,9 @@ def detect_drift_ks_test(
     Returns:
         Dictionary with drift results per feature.
     """
+    if threshold is None:
+        threshold = _default_drift_threshold()
+
     drift_report = {}
     drifted_features = []
 
@@ -85,7 +121,9 @@ def detect_drift_ks_test(
 
 
 def detect_drift_from_baselines(
-    current_data: pd.DataFrame, baselines: Dict, z_threshold: float = 3.0
+    current_data: pd.DataFrame,
+    baselines: Dict,
+    z_threshold: Optional[float] = None,
 ) -> Dict:
     """
     Quick drift check using stored baselines (mean/std).
@@ -100,6 +138,9 @@ def detect_drift_from_baselines(
     Returns:
         Dictionary with drift results.
     """
+    if z_threshold is None:
+        z_threshold = _default_z_threshold()
+
     drift_report = {}
     drifted = []
 

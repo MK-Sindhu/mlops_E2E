@@ -29,16 +29,16 @@ stages:
     deps:
     - path: configs/config.yaml
       hash: md5
-      md5: 63e5915ab9e9b43c97a5b2a5e03b1c7e
-      size: 1584
+      md5: f586fa2ea6ab0a2e059216ca5ea61103
+      size: 1839
     - path: data/raw/creditcard.csv
       hash: md5
       md5: e90efcb83d69faf99fcab8b0255024de
       size: 150828752
     - path: src/data/preprocess.py
       hash: md5
-      md5: 4d4614f959c24b0e1f92329b8bdd93e3
-      size: 5028
+      md5: b95bbaf2934755b311f9efeb21c921b0
+      size: 4999
     outs:
     - path: data/processed/X_test.csv
       hash: md5
@@ -81,8 +81,8 @@ stages:
     deps:
     - path: configs/config.yaml
       hash: md5
-      md5: 63e5915ab9e9b43c97a5b2a5e03b1c7e
-      size: 1584
+      md5: f586fa2ea6ab0a2e059216ca5ea61103
+      size: 1839
     - path: data/processed/X_test.csv
       hash: md5
       md5: f78377a045347dada9d19fc7b93bb7f1
@@ -101,62 +101,70 @@ stages:
       size: 441066
     - path: src/features/feature_engineering.py
       hash: md5
-      md5: 85b1a8e0ce8aab731e0d16261a67afa3
-      size: 5544
+      md5: 405c7f3263a998877d5ea3a03a532e2a
+      size: 5767
     - path: src/models/train.py
       hash: md5
-      md5: 74868e96e2838f51496090d0b52cb7fe
-      size: 8379
+      md5: ce0d954025d184c9e1b40ec659f7d0c7
+      size: 9678
+    params:
+      configs/config.yaml:
+        model.optimization.max_bin: 128
+        model.optimization.quantize: true
+        model.params.learning_rate: 0.1
+        model.params.max_depth: 4
+        model.params.n_estimators: 200
+        model.params.scale_pos_weight: 50
     outs:
     - path: models/best_model.joblib
       hash: md5
-      md5: 8070e6df204294b0ddfd1f5bc680ecac
-      size: 286642
+      md5: 8f847aabb25d31b3c4e505a90c30a95b
+      size: 299073
     - path: models/best_model.json
       hash: md5
-      md5: fa174970cfd2204a33c7bc02a0afcd9b
-      size: 420907
+      md5: b5064572928ec3498f0d8fb8ccdaf647
+      size: 359650
     - path: models/feature_names.json
       hash: md5
       md5: f48621b44801fc0409abf1843cd4cc95
       size: 266
     - path: models/metrics.json
       hash: md5
-      md5: 89511c2c5674635621a5ffd82aa8814d
+      md5: d0acace56075a83c8ee1a87c2c55f617
       size: 204
   evaluate:
     cmd: python scripts/run_evaluate.py
     deps:
     - path: data/processed/X_test.csv
       hash: md5
-      md5: 6995b1148a2fa4a3df2c8b54f5cef981
-      size: 29433457
+      md5: f78377a045347dada9d19fc7b93bb7f1
+      size: 29433736
     - path: data/processed/y_test.csv
       hash: md5
       md5: a92f48fda3a1185b09098da63613e45a
       size: 110272
     - path: models/best_model.joblib
       hash: md5
-      md5: 1fe30db75b763deffa304aaef22282e1
-      size: 278679
+      md5: 8f847aabb25d31b3c4e505a90c30a95b
+      size: 299073
     - path: scripts/run_evaluate.py
       hash: md5
       md5: 013b28810b96dc2da1775ba92118f96b
       size: 1740
     - path: src/features/feature_engineering.py
       hash: md5
-      md5: d53603ed3c3564ad3143d589877af1c1
-      size: 4136
+      md5: 405c7f3263a998877d5ea3a03a532e2a
+      size: 5767
     outs:
     - path: reports/confusion_matrix.json
       hash: md5
-      md5: 112b3f220b4e3c918ba0acfa47f00bf7
+      md5: 172d9df7b6be29c636d53bbf438cfde3
       size: 1709123
     - path: reports/eval_metrics.json
       hash: md5
-      md5: 05012dc0c4a324173d07dfdc76c9caae
-      size: 152
+      md5: f3258f2c21e168637da579bebec9e296
+      size: 168
     - path: reports/roc_curve.json
       hash: md5
-      md5: 48d5a7b05a5f40223df71b2f5bab891e
-      size: 238140
+      md5: 35d7b37e626dae4250832655e4309257
+      size: 137341

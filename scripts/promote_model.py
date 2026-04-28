@@ -157,7 +157,7 @@ def cmd_archive(args, client, name):
 # --- entry point ------------------------------------------------------
 
 
-def build_parser():
+def build_parser(default_promotion_metric: str = "pr_auc"):
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -169,8 +169,14 @@ def build_parser():
     pr.add_argument("--to", required=True, choices=["Staging", "Production"])
     pr.add_argument("--version", type=int,
                     help="Specific version (else picked by --best-by)")
-    pr.add_argument("--best-by", default="pr_auc",
-                    help="Metric to maximise when --version is omitted (default: pr_auc)")
+    pr.add_argument(
+        "--best-by",
+        default=default_promotion_metric,
+        help=(
+            "Metric to maximise when --version is omitted "
+            f"(default from config.mlflow.promotion_metric: {default_promotion_metric})"
+        ),
+    )
     pr.add_argument("--archive-existing", action="store_true",
                     help="Archive any existing versions currently in this stage")
 
@@ -181,9 +187,10 @@ def build_parser():
 
 
 def main():
-    args = build_parser().parse_args()
-
     config = load_config()
+    default_metric = config.get("mlflow", {}).get("promotion_metric", "pr_auc")
+    args = build_parser(default_promotion_metric=default_metric).parse_args()
+
     tracking_uri = os.environ.get(
         "MLFLOW_TRACKING_URI", config["mlflow"]["tracking_uri"]
     )

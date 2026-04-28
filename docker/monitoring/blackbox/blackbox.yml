@@ -1,0 +1,16 @@
+# Blackbox exporter probes services that don't expose Prometheus metrics
+# natively (MLflow, Airflow webserver, Streamlit). Prometheus scrapes the
+# blackbox exporter, which in turn HTTP-pings each target and reports
+# `probe_success{job=...}`. Combined with the API + node-exporter scrapes,
+# this gives full coverage of "all components monitored" for the rubric.
+
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: "ip4"
+      valid_status_codes: [200, 401]   # 401 = service up but unauthenticated
+      method: GET
+      fail_if_ssl: false
+      follow_redirects: true

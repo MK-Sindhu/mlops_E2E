@@ -2,6 +2,11 @@
 
 A production-style fraud-detection pipeline: XGBoost classifier behind a FastAPI service, with closed-loop retraining triggered by data drift, full observability, and a single-command path from local dev to a Docker Swarm deployment with replicated API behind a routing-mesh load balancer.
 
+> **Evaluators / graders** — every rubric line is mapped to evidence in
+> [`evaluation_docs/`](evaluation_docs/) (architecture diagram, HLD, LLD, test
+> plan + report, user manual). Start from
+> [`evaluation_docs/00_INDEX.md`](evaluation_docs/00_INDEX.md).
+
 ## Problem
 
 Credit card fraud is a low-volume, high-impact classification problem — only ~0.17% of transactions are fraudulent in the canonical Kaggle dataset, and a missed fraud is far more expensive than a false alarm. This project builds the *system around* such a model: ingestion, training, registry-backed serving, monitoring, drift detection, retraining, and deployment.

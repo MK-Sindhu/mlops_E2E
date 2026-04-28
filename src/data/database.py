@@ -2,6 +2,10 @@
 Database Module — SQLite for persistent storage.
 Stores predictions and feedback for the feedback loop.
 Guideline: Persist pipeline state and metadata.
+
+Path resolution precedence:
+    1. ``DB_PATH`` env var
+    2. ``data.database_path`` from configs/config.yaml
 """
 
 import os
@@ -9,16 +13,41 @@ import sqlite3
 import logging
 from typing import Optional, Dict
 
+import yaml
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DB_PATH", "data/fraud_detection.db")
+_CONFIG_PATH = "configs/config.yaml"
+
+
+def _load_config_section(section: str) -> dict:
+    """Read a config section from disk; returns {} if file is missing."""
+    if not os.path.exists(_CONFIG_PATH):
+        return {}
+    with open(_CONFIG_PATH, "r") as f:
+        return yaml.safe_load(f).get(section, {}) or {}
+
+
+def get_db_path() -> str:
+    """Resolve the SQLite path: env var → config → final fallback."""
+    env = os.getenv("DB_PATH")
+    if env:
+        return env
+    cfg_path = _load_config_section("data").get("database_path")
+    return cfg_path or "data/fraud_detection.db"
+
+
+def get_feedback_window() -> int:
+    """Resolve the feedback window size from config."""
+    return int(_load_config_section("monitoring").get("feedback_window", 100))
 
 
 def get_connection():
     """Get SQLite connection."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -71,7 +100,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    logger.info(f"Database initialized at {DB_PATH}")
+    logger.info(f"Database initialized at {get_db_path()}")
 
 
 def save_prediction(
@@ -116,8 +145,15 @@ def save_feedback(transaction_id: str, predicted: int, actual: int):
     conn.close()
 
 
-def get_model_accuracy(window: int = 100) -> Optional[float]:
-    """Calculate accuracy from recent feedback."""
+def get_model_accuracy(window: Optional[int] = None) -> Optional[float]:
+    """Calculate accuracy from recent feedback.
+
+    Args:
+        window: How many recent feedback rows to evaluate. If None, falls back
+            to ``monitoring.feedback_window`` from config.yaml (default 100).
+    """
+    if window is None:
+        window = get_feedback_window()
     conn = get_connection()
     rows = conn.execute(
         "SELECT is_correct FROM feedback ORDER BY id DESC LIMIT ?", (window,)
@@ -172,4 +208,4 @@ def save_drift_report(
 
 if __name__ == "__main__":
     init_db()
-    print(f"Database created at {DB_PATH}")
+    print(f"Database created at {get_db_path()}")

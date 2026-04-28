@@ -47,12 +47,17 @@ logger = logging.getLogger(__name__)
 # --- Production signals ----------------------------------------------
 
 
-def get_recent_predictions_df(window: int = 1000):
+def get_recent_predictions_df(window: int = 1000, features_path: str = None):
     """Pull the most-recent predictions' input features into a DataFrame.
 
     The /predict endpoint stores each request's feature vector as a JSON
     string in ``predictions.features``; we deserialize and label with the
-    saved ``models/feature_names.json`` columns.
+    feature-name list from ``api.features_path`` in config.
+
+    Args:
+        window: Number of most-recent predictions to include.
+        features_path: Where to load the feature-name list from. Defaults
+            to ``api.features_path`` in config.yaml.
     """
     conn = get_connection()
     rows = conn.execute(
@@ -65,10 +70,14 @@ def get_recent_predictions_df(window: int = 1000):
     if not rows:
         return None
 
-    if not os.path.exists("models/feature_names.json"):
-        logger.warning("models/feature_names.json not found; cannot label drift df")
+    if features_path is None:
+        features_path = (
+            load_config().get("api", {}).get("features_path", "models/feature_names.json")
+        )
+    if not os.path.exists(features_path):
+        logger.warning(f"{features_path} not found; cannot label drift df")
         return None
-    with open("models/feature_names.json") as f:
+    with open(features_path) as f:
         feature_names = json.load(f)
 
     feature_arrays = []
@@ -90,12 +99,20 @@ def check_drift(config: dict):
 
     Returns the drift report (dict) or None if there's not enough data.
     Persists the report to the ``drift_reports`` table either way (when run).
+    All knobs (window sizes, sampling, min-samples) come from
+    ``monitoring.*`` in configs/config.yaml.
     """
-    current = get_recent_predictions_df(window=1000)
-    if current is None or len(current) < 30:
+    monitoring = config.get("monitoring", {}) or {}
+    recent_window = int(monitoring.get("recent_predictions_window", 1000))
+    min_recent = int(monitoring.get("drift_min_recent_samples", 30))
+    ref_sample_size = int(monitoring.get("drift_reference_sample_size", 5000))
+    ref_random_state = int(monitoring.get("drift_reference_random_state", 42))
+
+    current = get_recent_predictions_df(window=recent_window)
+    if current is None or len(current) < min_recent:
         logger.info(
             f"Insufficient recent predictions for drift detection "
-            f"({0 if current is None else len(current)} rows; need ≥30)"
+            f"({0 if current is None else len(current)} rows; need ≥{min_recent})"
         )
         return None
 
@@ -108,12 +125,12 @@ def check_drift(config: dict):
     # Sample training data — KS-test doesn't need the full set
     reference = engineer_features(
         pd.read_csv(x_train_path).sample(
-            n=min(5000, sum(1 for _ in open(x_train_path)) - 1),
-            random_state=42,
+            n=min(ref_sample_size, sum(1 for _ in open(x_train_path)) - 1),
+            random_state=ref_random_state,
         )
     )
 
-    threshold = config["monitoring"]["drift_threshold"]
+    threshold = monitoring.get("drift_threshold", 0.05)
     report = detect_drift_ks_test(reference, current, threshold=threshold)
 
     save_drift_report(

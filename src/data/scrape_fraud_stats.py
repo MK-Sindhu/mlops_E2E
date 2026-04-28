@@ -11,7 +11,11 @@ Sources:
   - Kaggle:    mostly JS-rendered, only static <title> / <meta> tags are
                available without a headless browser. Documented limitation.
 
-Output: data/external/fraud_stats.json
+Tunables (URLs, user agent, timeouts) live in ``configs/config.yaml`` under
+``scraper.*``. Output path is composed from ``data.external_path`` +
+``data.fraud_stats_filename``. ``SCRAPER_VERSION`` and ``WIKI_META_SECTIONS``
+remain in code because they're a parser-version identity and a parser
+detail respectively, not user tunables.
 """
 
 import json
@@ -22,18 +26,13 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import requests
+import yaml
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 SCRAPER_VERSION = "1.0.0"
-USER_AGENT = (
-    "fraud-detection-mlops/1.0 "
-    "(educational; +https://github.com/MK-Sindhu/mlops_E2E)"
-)
-DEFAULT_TIMEOUT = 10
-RETRY_DELAY_S = 2
 
 # Section headings to skip when listing Wikipedia article sections
 WIKI_META_SECTIONS = {
@@ -46,15 +45,55 @@ WIKI_META_SECTIONS = {
     "Bibliography",
 }
 
-SOURCES = {
-    "wikipedia_credit_card_fraud": "https://en.wikipedia.org/wiki/Credit_card_fraud",
-    "kaggle_creditcard_dataset": "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
-}
+
+def _load_config(config_path: str = "configs/config.yaml") -> dict:
+    """Read the project config; returns {} if the file is missing."""
+    if not os.path.exists(config_path):
+        return {}
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f) or {}
 
 
-def fetch_page(url: str, timeout: int = DEFAULT_TIMEOUT) -> Optional[str]:
-    """GET a URL with a polite User-Agent. One retry on connection failure."""
-    headers = {"User-Agent": USER_AGENT}
+def _scraper_settings(config: Optional[dict] = None) -> dict:
+    """Resolve scraper section with safe defaults if a key is missing."""
+    cfg = config if config is not None else _load_config()
+    s = cfg.get("scraper", {}) or {}
+    return {
+        "user_agent": s.get(
+            "user_agent",
+            "fraud-detection-mlops/1.0 (educational; +https://github.com/MK-Sindhu/mlops_E2E)",
+        ),
+        "default_timeout_s": int(s.get("default_timeout_s", 10)),
+        "retry_delay_s": int(s.get("retry_delay_s", 2)),
+        "sources": s.get("sources", {}) or {},
+    }
+
+
+def _default_output_path(config: Optional[dict] = None) -> str:
+    """Compose ``data.external_path`` + ``data.fraud_stats_filename`` from config."""
+    cfg = config if config is not None else _load_config()
+    data = cfg.get("data", {}) or {}
+    base = data.get("external_path", "data/external/")
+    name = data.get("fraud_stats_filename", "fraud_stats.json")
+    return os.path.join(base, name)
+
+
+def fetch_page(
+    url: str,
+    timeout: Optional[int] = None,
+    user_agent: Optional[str] = None,
+    retry_delay_s: Optional[int] = None,
+) -> Optional[str]:
+    """GET a URL with a polite User-Agent. One retry on connection failure.
+
+    All knobs default to ``configs/config.yaml`` values when omitted.
+    """
+    s = _scraper_settings()
+    timeout = timeout if timeout is not None else s["default_timeout_s"]
+    user_agent = user_agent if user_agent is not None else s["user_agent"]
+    retry_delay_s = retry_delay_s if retry_delay_s is not None else s["retry_delay_s"]
+
+    headers = {"User-Agent": user_agent}
     for attempt in (1, 2):
         try:
             r = requests.get(url, headers=headers, timeout=timeout)
@@ -63,7 +102,7 @@ def fetch_page(url: str, timeout: int = DEFAULT_TIMEOUT) -> Optional[str]:
         except requests.RequestException as e:
             logger.warning(f"Attempt {attempt} fetching {url} failed: {e}")
             if attempt == 1:
-                time.sleep(RETRY_DELAY_S)
+                time.sleep(retry_delay_s)
     logger.error(f"Failed to fetch {url} after retries")
     return None
 
@@ -163,10 +202,26 @@ PARSERS = {
 }
 
 
-def scrape_all(output_path: str = "data/external/fraud_stats.json") -> Dict:
-    """Run every configured scraper and write the JSON envelope."""
+def scrape_all(output_path: Optional[str] = None) -> Dict:
+    """Run every configured scraper and write the JSON envelope.
+
+    Source URLs come from ``scraper.sources`` in configs/config.yaml. Each
+    key must match a parser registered in :data:`PARSERS` — that pairing is
+    a code-level contract.
+    """
+    config = _load_config()
+    sources = _scraper_settings(config)["sources"]
+    if output_path is None:
+        output_path = _default_output_path(config)
+
     results = []
-    for name, url in SOURCES.items():
+    for name, url in sources.items():
+        if name not in PARSERS:
+            logger.warning(
+                f"No parser registered for source '{name}'; "
+                "add a parser before configuring its URL"
+            )
+            continue
         logger.info(f"Scraping {name}: {url}")
         html = fetch_page(url)
         if html is None:
@@ -186,7 +241,9 @@ def scrape_all(output_path: str = "data/external/fraud_stats.json") -> Dict:
         "sources": results,
     }
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(payload, f, indent=2)
     logger.info(f"Wrote {len(results)} sources to {output_path}")

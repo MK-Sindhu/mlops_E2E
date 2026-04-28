@@ -12,7 +12,11 @@ config = load_config()
 df = load_raw_data(config["data"]["raw_path"])
 report = run_all_validations(df)
 
-with open("data/validation_report.json", "w") as f:
+report_path = config["data"].get("validation_report_path", "data/validation_report.json")
+report_dir = os.path.dirname(report_path)
+if report_dir:
+    os.makedirs(report_dir, exist_ok=True)
+with open(report_path, "w") as f:
     json.dump(report, f, indent=2)
 
 print("Validation:", "PASS" if report["overall_valid"] else "FAIL")

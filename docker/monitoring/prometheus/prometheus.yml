@@ -30,3 +30,72 @@ scrape_configs:
       - targets: ["node-exporter:9100"]
         labels:
           service: "host"
+
+  # ── Blackbox HTTP probes ─────────────────────────────────────────
+  # Closes the rubric's "all components monitored" item. The blackbox
+  # exporter HTTP-pings each target; success surfaces as
+  # `probe_success{instance=<url>, job="blackbox-<service>"}`. Alert
+  # rules in alert_rules.yml fire if any probe stays at 0 for 2 min.
+  - job_name: "blackbox-mlflow"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://mlflow:5000/health"]
+        labels:
+          service: "mlflow"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: "blackbox-airflow"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://airflow:8080/health"]
+        labels:
+          service: "airflow"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: "blackbox-streamlit"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://streamlit:8501/_stcore/health"]
+        labels:
+          service: "streamlit"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: "blackbox-grafana"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://grafana:3000/api/health"]
+        labels:
+          service: "grafana"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

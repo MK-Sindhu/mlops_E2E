@@ -25,6 +25,7 @@ from typing import List, Optional
 import joblib
 import numpy as np
 import pandas as pd
+import yaml
 from fastapi import FastAPI, HTTPException
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -40,6 +41,14 @@ from src.data.database import (
     save_feedback,
     save_prediction,
 )
+
+
+def _load_config(config_path: str = "configs/config.yaml") -> dict:
+    """Read configs/config.yaml; returns {} if absent."""
+    if not os.path.exists(config_path):
+        return {}
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f) or {}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -125,9 +134,20 @@ async def lifespan(_app: FastAPI):
 
     init_db()
 
-    registered_name = os.getenv("MLFLOW_REGISTERED_NAME", "fraud-detection-xgboost")
-    model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
-    fallback_path = os.getenv("MODEL_PATH", "models/best_model.joblib")
+    cfg = _load_config()
+    mlflow_cfg = cfg.get("mlflow", {}) or {}
+    api_cfg = cfg.get("api", {}) or {}
+
+    registered_name = os.getenv(
+        "MLFLOW_REGISTERED_NAME",
+        mlflow_cfg.get("registered_model_name", "fraud-detection-xgboost"),
+    )
+    model_stage = os.getenv(
+        "MLFLOW_MODEL_STAGE", mlflow_cfg.get("model_stage", "Production")
+    )
+    fallback_path = os.getenv(
+        "MODEL_PATH", api_cfg.get("model_path", "models/best_model.joblib")
+    )
 
     try:
         model, model_version, run_id = _load_model_from_registry(
@@ -153,8 +173,16 @@ async def lifespan(_app: FastAPI):
             logger.error(f"Failed to load model from {fallback_path}: {file_err}")
             model_source = f"FAILED ({file_err})"
 
-    features_path = os.getenv("FEATURES_PATH", "models/feature_names.json")
-    scaler_path = os.getenv("SCALER_PATH", "data/processed/scaler.joblib")
+    features_path = os.getenv(
+        "FEATURES_PATH", api_cfg.get("features_path", "models/feature_names.json")
+    )
+    # Scaler lives in the processed-data directory (data.processed_path) under
+    # the conventional filename produced by preprocess.py.
+    data_cfg = cfg.get("data", {}) or {}
+    default_scaler_path = os.path.join(
+        data_cfg.get("processed_path", "data/processed/"), "scaler.joblib"
+    )
+    scaler_path = os.getenv("SCALER_PATH", default_scaler_path)
 
     try:
         with open(features_path, "r") as f:
@@ -404,4 +432,9 @@ def metrics():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    _api_cfg = _load_config().get("api", {}) or {}
+    uvicorn.run(
+        app,
+        host=_api_cfg.get("host", "0.0.0.0"),
+        port=int(_api_cfg.get("port", 8000)),
+    )

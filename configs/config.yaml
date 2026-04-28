@@ -1,4 +1,12 @@
 # Project Configuration
+#
+# Single source of truth for *runtime tunables*. Values that are part of
+# the code identity (e.g. FEATURE_VERSION, BASELINE_SCHEMA_VERSION,
+# EXPECTED_SCHEMA, the parser registry in scrape_fraud_stats.py) are NOT
+# in this file — bumping them is a deliberate code change, not a config
+# change.
+#
+# Precedence at runtime: ENV var > value here > in-code default.
 project:
   name: "credit-card-fraud-detection"
   version: "1.0.0"
@@ -8,6 +16,11 @@ data:
   raw_path: "data/raw/creditcard.csv"
   processed_path: "data/processed/"
   baselines_path: "data/baselines/"
+  baselines_filename: "feature_baselines.json"
+  external_path: "data/external/"
+  fraud_stats_filename: "fraud_stats.json"
+  database_path: "data/fraud_detection.db"
+  validation_report_path: "data/validation_report.json"
   test_size: 0.2
   random_state: 42
 
@@ -34,6 +47,8 @@ model:
     quantize: true       # When true, force tree_method=hist + reduced max_bin
     max_bin: 128         # Histogram bins (XGBoost default is 256)
     n_jobs: -1
+  # How many single-row predict() calls to time when measuring latency
+  latency_iterations: 100
 
 # MLflow settings
 mlflow:
@@ -42,19 +57,52 @@ mlflow:
   tracking_uri: "file:./mlruns"
   experiment_name: "fraud-detection"
   registered_model_name: "fraud-detection-xgboost"
+  # Stage / alias the API loads at startup. Override with MLFLOW_MODEL_STAGE.
+  model_stage: "Production"
+  # Metric used by `promote_model.py promote --best-by` when --version omitted
+  promotion_metric: "pr_auc"
 
 # API settings
 api:
   host: "0.0.0.0"
   port: 8000
+  # Path to the joblib model the API falls back to if the registry is unreachable.
   model_path: "models/best_model.joblib"
+  # Path to the feature-name list the API uses to validate request shapes.
+  features_path: "models/feature_names.json"
+  # Default URL Streamlit dials when API_URL env var is unset.
+  url: "http://localhost:8000"
+  # HTTP client timeouts (seconds). UI uses these to talk to the API.
+  client_timeout_seconds: 3
+  explain_timeout_seconds: 15
 
 # Monitoring
 monitoring:
-  drift_threshold: 0.05  # KS-test p-value threshold
-  performance_decay_threshold: 0.80  # Minimum F1-score
-  alert_error_rate: 0.05  # 5% error rate threshold
-  feedback_window: 100  # Evaluate after N feedback entries
+  # KS-test p-value threshold; below this means drift detected.
+  drift_threshold: 0.05
+  # Z-score cut-off for the lighter-weight baseline drift check.
+  drift_z_threshold: 3.0
+  # Minimum F1-score / feedback accuracy that retains the current Production model.
+  performance_decay_threshold: 0.80
+  # Default error-rate threshold (used by docs / alert rule references).
+  alert_error_rate: 0.05
+  # Minimum number of feedback rows before accuracy check trusts the value.
+  feedback_window: 100
+  # Drift-evaluation knobs (used by scripts/check_and_retrain.py).
+  recent_predictions_window: 1000      # how many recent /predict rows to inspect
+  drift_reference_sample_size: 5000    # how many training rows to compare against
+  drift_reference_random_state: 42     # seed for the reference sample
+  drift_min_recent_samples: 30         # below this we skip drift detection
+
+# Scraper (BeautifulSoup-based public-data scraper for the Threat Landscape page)
+scraper:
+  user_agent: "fraud-detection-mlops/1.0 (educational; +https://github.com/MK-Sindhu/mlops_E2E)"
+  default_timeout_s: 10
+  retry_delay_s: 2
+  # Source keys are bound to parser functions in code; only the URLs are tunable.
+  sources:
+    wikipedia_credit_card_fraud: "https://en.wikipedia.org/wiki/Credit_card_fraud"
+    kaggle_creditcard_dataset: "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud"
 
 # Security
 security:

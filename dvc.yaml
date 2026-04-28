@@ -46,6 +46,18 @@ stages:
       - data/processed/y_train.csv
       - data/processed/y_test.csv
       - configs/config.yaml
+    # DVC-tracked params — dvc exp run -S <key>=<value> creates a new
+    # experiment branch when any of these change. The canonical values
+    # still live in configs/config.yaml; these declare which keys are
+    # experiment knobs.
+    params:
+      - configs/config.yaml:
+          - model.params.n_estimators
+          - model.params.max_depth
+          - model.params.learning_rate
+          - model.params.scale_pos_weight
+          - model.optimization.quantize
+          - model.optimization.max_bin
     outs:
       - models/best_model.joblib
       - models/best_model.json

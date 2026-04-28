@@ -105,6 +105,15 @@ services:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      # URLs the "Pipeline Status" page polls. Uses the compose-network DNS
+      # names so the streamlit container can reach each service directly.
+      - MLFLOW_URL=http://mlflow:5000
+      - AIRFLOW_URL=http://airflow:8080
+      - PROMETHEUS_URL=http://prometheus:9090
+      - GRAFANA_URL=http://localhost:3000
+      - AIRFLOW_USER=admin
+      # Read at request time from the same docker secret the airflow service uses.
+      - AIRFLOW_PASSWORD_FILE=/run/secrets/airflow_admin_password
     command: >
       streamlit run src/app/streamlit_app.py
       --server.port=8501
@@ -119,6 +128,13 @@ services:
       start_period: 30s
     volumes:
       - ./data:/app/data:ro
+      # Mount the DVC manifests read-only so the Pipeline Status page can
+      # render stage status from dvc.lock without needing the DVC binary
+      # inside the streamlit image.
+      - ./dvc.yaml:/app/dvc.yaml:ro
+      - ./dvc.lock:/app/dvc.lock:ro
+    secrets:
+      - airflow_admin_password
     depends_on:
       - api
     networks:
@@ -164,6 +180,12 @@ services:
       # DAG run history is ephemeral on `docker compose down`; that's fine
       # for a learning project — DAGs themselves live in ./airflow/dags/.
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # Airflow 2.x defaults `[api] auth_backends` to `session` only, which
+      # rejects basic-auth from non-browser callers. The Streamlit
+      # "Pipeline Status" page calls /api/v1/dags with HTTP Basic, so we
+      # add the basic_auth backend here. Session auth still works for the
+      # web UI; basic_auth is only used by the Streamlit poll.
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       # MLflow tracking URI for retrain DAG (overrides config default)
       MLFLOW_TRACKING_URI: http://mlflow:5000
       PYTHONPATH: /project
@@ -217,6 +239,22 @@ services:
     networks:
       - fraud-net
 
+  # ── Blackbox Exporter (HTTP probes for non-instrumented services) ──
+  # Probes MLflow, Airflow, Streamlit, Grafana — services that don't
+  # expose Prometheus metrics on their own. Prometheus scrapes the
+  # exporter (port 9115), which in turn HTTP-pings each target.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: fraud-blackbox-exporter
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./docker/monitoring/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    networks:
+      - fraud-net
+
   # ── Prometheus (Metrics Collection) ────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
@@ -230,6 +268,7 @@ services:
       - api
       - node-exporter
       - alertmanager
+      - blackbox-exporter
     networks:
       - fraud-net
 

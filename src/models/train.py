@@ -21,6 +21,8 @@ import mlflow
 import mlflow.xgboost
 import pandas as pd
 import yaml
+from mlflow.models.signature import infer_signature
+from mlflow.tracking import MlflowClient
 from sklearn.metrics import (
     average_precision_score,
     classification_report,
@@ -31,7 +33,7 @@ from sklearn.metrics import (
 )
 from xgboost import XGBClassifier
 
-from src.features.feature_engineering import engineer_features
+from src.features.feature_engineering import FEATURE_VERSION, engineer_features
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -116,8 +118,18 @@ def measure_inference_latency_ms(
     return round((time.perf_counter() - start) / n_iter * 1000, 2)
 
 
-def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
-    """ML metrics + business metric (latency)."""
+def evaluate_model(
+    model, X_test: pd.DataFrame, y_test: pd.Series, config: Optional[dict] = None
+) -> dict:
+    """ML metrics + business metric (latency).
+
+    ``config['model']['latency_iterations']`` controls how many single-row
+    predict() calls are timed (default 100 if config not provided).
+    """
+    n_iter = 100
+    if config is not None:
+        n_iter = int(config.get("model", {}).get("latency_iterations", n_iter))
+
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
     metrics = {
@@ -126,7 +138,9 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
         "recall": float(recall_score(y_test, y_pred)),
         "roc_auc": float(roc_auc_score(y_test, y_proba)),
         "pr_auc": float(average_precision_score(y_test, y_proba)),
-        "avg_inference_latency_ms": measure_inference_latency_ms(model, X_test),
+        "avg_inference_latency_ms": measure_inference_latency_ms(
+            model, X_test, n_iter=n_iter
+        ),
     }
     logger.info(f"Metrics: {json.dumps(metrics, indent=2)}")
     logger.info(
@@ -138,14 +152,28 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
 # --- Persistence -------------------------------------------------------
 
 
-def save_artifacts(model, X_train: pd.DataFrame, metrics: dict) -> dict:
-    """Save model + metadata to disk, return paths."""
-    os.makedirs("models", exist_ok=True)
+def save_artifacts(
+    model, X_train: pd.DataFrame, metrics: dict, config: Optional[dict] = None
+) -> dict:
+    """Save model + metadata to disk, return paths.
+
+    The model directory is derived from ``api.model_path`` in config so that
+    the path lives in exactly one place (and DVC's ``outs:`` already pin
+    these filenames downstream).
+    """
+    api_cfg = (config or {}).get("api", {}) or {}
+    model_path = api_cfg.get("model_path", "models/best_model.joblib")
+    features_path = api_cfg.get("features_path", "models/feature_names.json")
+
+    model_dir = os.path.dirname(model_path) or "models"
+    os.makedirs(model_dir, exist_ok=True)
+
+    base, _ = os.path.splitext(model_path)  # e.g. "models/best_model"
     paths = {
-        "joblib": "models/best_model.joblib",
-        "json": "models/best_model.json",
-        "features": "models/feature_names.json",
-        "metrics": "models/metrics.json",
+        "joblib": model_path,
+        "json": f"{base}.json",
+        "features": features_path,
+        "metrics": os.path.join(model_dir, "metrics.json"),
     }
     joblib.dump(model, paths["joblib"])
     model.save_model(paths["json"])
@@ -206,13 +234,18 @@ def train_and_log(
         model.fit(X_train, y_train)
 
         # Evaluate
-        metrics = evaluate_model(model, X_test, y_test)
+        metrics = evaluate_model(model, X_test, y_test, config=config)
         mlflow.log_metrics(metrics)
 
         # Persist + size
-        paths = save_artifacts(model, X_train, metrics)
+        paths = save_artifacts(model, X_train, metrics, config=config)
         size_metrics = compute_model_size_metrics(paths)
         mlflow.log_metrics(size_metrics)
+
+        # Build a signature + input example so the registry "Schema" panel is
+        # populated and the "Make Predictions" snippets are concrete.
+        signature = infer_signature(X_train, model.predict(X_train.head(5)))
+        input_example = X_train.head(3)
 
         # Register model in MLflow Model Registry
         registered_name = config["mlflow"].get("registered_model_name")
@@ -221,19 +254,77 @@ def train_and_log(
                 model,
                 "model",
                 registered_model_name=registered_name,
+                signature=signature,
+                input_example=input_example,
             )
             logger.info(f"Registered as '{registered_name}'")
-        else:
-            mlflow.xgboost.log_model(model, "model")
 
-        # Auxiliary artifacts
+            # Enrich the freshly-registered version with a description + tags
+            # so the Models → Version page is no longer empty. We have to
+            # search by run_id because log_model returns no version info.
+            try:
+                client = MlflowClient()
+                versions = client.search_model_versions(
+                    f"name='{registered_name}' AND run_id='{run.info.run_id}'"
+                )
+                if versions:
+                    v = versions[0].version
+                    quantized = config["model"]["optimization"].get("quantize", False)
+                    description_lines = [
+                        f"**Run name**: `{run_name or 'unnamed'}`",
+                        f"**F1**: {metrics['f1_score']:.4f} • "
+                        f"**PR-AUC**: {metrics['pr_auc']:.4f} • "
+                        f"**Recall**: {metrics['recall']:.4f}",
+                        f"**Latency**: {metrics['avg_inference_latency_ms']} ms • "
+                        f"**Size**: {size_metrics['model_size_bytes_joblib']:,} bytes",
+                        f"**Quantized**: {quantized} • "
+                        f"**Git commit**: `{get_git_commit_hash()[:12]}`",
+                    ]
+                    client.update_model_version(
+                        name=registered_name,
+                        version=v,
+                        description="\n\n".join(description_lines),
+                    )
+                    # Searchable tags — show up under "Tags" on the version page.
+                    tags = {
+                        "run_name": run_name or "unnamed",
+                        "f1_score": f"{metrics['f1_score']:.4f}",
+                        "pr_auc": f"{metrics['pr_auc']:.4f}",
+                        "recall": f"{metrics['recall']:.4f}",
+                        "avg_inference_latency_ms": str(
+                            metrics["avg_inference_latency_ms"]
+                        ),
+                        "quantized": str(quantized),
+                        "git_commit": get_git_commit_hash()[:12],
+                        "feature_version": FEATURE_VERSION,
+                    }
+                    for k, val in tags.items():
+                        client.set_model_version_tag(
+                            name=registered_name, version=v, key=k, value=val
+                        )
+                    logger.info(
+                        f"Enriched registry v{v} with description + {len(tags)} tags"
+                    )
+            except Exception as e:
+                # Registry enrichment is best-effort — don't fail training over it.
+                logger.warning(f"Could not enrich registry version metadata: {e}")
+        else:
+            mlflow.xgboost.log_model(
+                model, "model", signature=signature, input_example=input_example
+            )
+
+        # Auxiliary artifacts (paths derived from config, not hardcoded)
+        data_cfg = config.get("data", {}) or {}
+        scaler_path = os.path.join(
+            data_cfg.get("processed_path", "data/processed/"), "scaler.joblib"
+        )
+        baseline_path = os.path.join(
+            data_cfg.get("baselines_path", "data/baselines/"),
+            data_cfg.get("baselines_filename", "feature_baselines.json"),
+        )
         for p in paths.values():
             mlflow.log_artifact(p, artifact_path="model_files")
-        for aux in (
-            "data/processed/scaler.joblib",
-            "configs/config.yaml",
-            "data/baselines/feature_baselines.json",
-        ):
+        for aux in (scaler_path, "configs/config.yaml", baseline_path):
             if os.path.exists(aux):
                 mlflow.log_artifact(aux, artifact_path="auxiliary")
 

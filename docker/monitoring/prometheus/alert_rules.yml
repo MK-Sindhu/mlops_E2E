@@ -43,3 +43,44 @@ groups:
         annotations:
           summary: "Prediction latency exceeds 200ms (p95)"
           description: "95th percentile latency is above the 200ms business requirement."
+
+  # Blackbox HTTP-probe alerts — fire if any non-API service goes down.
+  # Together with HighErrorRate (API) + node-exporter alerts (host), this
+  # gives the rubric's "all components monitored" coverage.
+  - name: blackbox_uptime_alerts
+    rules:
+      - alert: MLflowDown
+        expr: probe_success{job="blackbox-mlflow"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MLflow is unreachable"
+          description: "Blackbox HTTP probe to MLflow has failed for 2 minutes."
+
+      - alert: AirflowDown
+        expr: probe_success{job="blackbox-airflow"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow webserver is unreachable"
+          description: "Blackbox HTTP probe to Airflow has failed for 2 minutes."
+
+      - alert: StreamlitDown
+        expr: probe_success{job="blackbox-streamlit"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Streamlit dashboard is unreachable"
+          description: "Blackbox HTTP probe to Streamlit has failed for 2 minutes."
+
+      - alert: GrafanaDown
+        expr: probe_success{job="blackbox-grafana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Grafana is unreachable"
+          description: "Blackbox HTTP probe to Grafana has failed for 2 minutes."

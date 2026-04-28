@@ -1,0 +1,173 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "schemaVersion": 30,
+  "version": 1,
+  "uid": "fraud-detection-api-detail",
+  "title": "Fraud Detection — API Endpoint Detail",
+  "tags": ["fraud", "api", "endpoints"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate by handler (req/s)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "sum by (handler) (rate(http_requests_total[1m]))",
+         "legendFormat": "{{handler}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "lastNotNull"]}}
+    },
+    {
+      "id": 2,
+      "title": "Status code distribution (req/s)",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "sum by (status) (rate(http_requests_total[1m]))",
+         "legendFormat": "HTTP {{status}}", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "reqps",
+          "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "normal"}}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["sum"]}}
+    },
+    {
+      "id": 3,
+      "title": "5xx error rate (%)",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 8, "w": 6, "h": 6},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "100 * (sum(rate(http_requests_total{status=~\"5..\"}[5m])) OR on() vector(0)) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+         "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1},
+            {"color": "red", "value": 5}]}}
+      },
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "value"}
+    },
+    {
+      "id": 4,
+      "title": "4xx client-error rate (%)",
+      "type": "stat",
+      "gridPos": {"x": 6, "y": 8, "w": 6, "h": 6},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "100 * (sum(rate(http_requests_total{status=~\"4..\"}[5m])) OR on() vector(0)) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+         "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 5},
+            {"color": "red", "value": 25}]}}
+      },
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "value"}
+    },
+    {
+      "id": 5,
+      "title": "Avg request size (bytes)",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 8, "w": 6, "h": 6},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "rate(http_request_size_bytes_sum[5m]) / clamp_min(rate(http_request_size_bytes_count[5m]), 0.001)",
+         "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "value"}
+    },
+    {
+      "id": 6,
+      "title": "Avg response size (bytes)",
+      "type": "stat",
+      "gridPos": {"x": 18, "y": 8, "w": 6, "h": 6},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "rate(http_response_size_bytes_sum[5m]) / clamp_min(rate(http_response_size_bytes_count[5m]), 0.001)",
+         "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "value"}
+    },
+    {
+      "id": 7,
+      "title": "HTTP latency p99 by handler",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "histogram_quantile(0.99, sum by (handler, le) (rate(http_request_duration_seconds_bucket[5m])))",
+         "legendFormat": "p99 {{handler}}", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "red", "value": 0.2}]}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 8,
+      "title": "Prediction latency histogram (heatmap)",
+      "type": "heatmap",
+      "gridPos": {"x": 12, "y": 14, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "sum(rate(prediction_latency_seconds_bucket[1m])) by (le)",
+         "format": "heatmap", "legendFormat": "{{le}}", "refId": "A"}
+      ],
+      "options": {"yAxis": {"unit": "s", "decimals": 3}, "color": {"scheme": "Spectral", "mode": "scheme"}}
+    },
+    {
+      "id": 9,
+      "title": "Prediction latency — p50 / p95 / p99",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 22, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(prediction_latency_seconds_bucket[5m])) by (le))",
+         "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum(rate(prediction_latency_seconds_bucket[5m])) by (le))",
+         "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum(rate(prediction_latency_seconds_bucket[5m])) by (le))",
+         "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "red", "value": 0.2}]}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}}
+    },
+    {
+      "id": 10,
+      "title": "Predictions vs. errors per minute",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 22, "w": 12, "h": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "sum(rate(predictions_total[1m])) * 60", "legendFormat": "predictions /min", "refId": "A"},
+        {"expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) * 60", "legendFormat": "5xx /min", "refId": "B"},
+        {"expr": "sum(rate(http_requests_total{status=~\"4..\"}[1m])) * 60", "legendFormat": "4xx /min", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}}
+    }
+  ]
+}

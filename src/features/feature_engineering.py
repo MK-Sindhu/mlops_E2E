@@ -76,6 +76,7 @@ def compute_drift_baselines(
     df: pd.DataFrame,
     output_path: str,
     source_path: Optional[str] = None,
+    filename: str = "feature_baselines.json",
 ) -> Dict:
     """
     Compute statistical baselines for drift detection.
@@ -91,6 +92,8 @@ def compute_drift_baselines(
         output_path: Directory to save baselines JSON in.
         source_path: Optional path to the source data file used to compute
             baselines. If provided, its MD5 is stored as provenance.
+        filename: Output JSON filename (matches ``data.baselines_filename``
+            in configs/config.yaml).
 
     Returns:
         Dictionary of baseline statistics per feature (the inner ``features``
@@ -124,8 +127,8 @@ def compute_drift_baselines(
 
     payload = {"_meta": meta, "features": feature_stats}
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    baseline_file = os.path.join(output_path, "feature_baselines.json")
+    os.makedirs(output_path, exist_ok=True)
+    baseline_file = os.path.join(output_path, filename)
     with open(baseline_file, "w") as f:
         json.dump(payload, f, indent=2)
 
@@ -158,5 +161,9 @@ if __name__ == "__main__":
     print(f"Features after engineering: {X_train_feat.shape[1]}")
 
     # Compute baselines
-    baselines = compute_drift_baselines(X_train_feat, config["data"]["baselines_path"])
+    baselines = compute_drift_baselines(
+        X_train_feat,
+        config["data"]["baselines_path"],
+        filename=config["data"].get("baselines_filename", "feature_baselines.json"),
+    )
     print(f"Baselines computed for {len(baselines)} features")

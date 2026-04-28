@@ -2,7 +2,7 @@
 
 ## Goal
 
-Two **provisioned** dashboards that auto-load the moment the stack starts — anyone running `docker compose up` sees real-time fraud + host metrics without clicking through Grafana's UI to import anything.
+**Seven** provisioned dashboards that auto-load the moment the stack starts — anyone running `docker compose up` sees real-time fraud + host metrics without clicking through Grafana's UI to import anything.
 
 > Guideline: *"Build panels for metrics. Continuously monitor model performance in production."*
 
@@ -38,9 +38,74 @@ Tells Grafana to scan `/etc/grafana/provisioning/dashboards/` on startup and loa
 | 5 | Memory available | `node_memory_MemAvailable_bytes` | Stat panel in bytes (auto-formats to GB) |
 | 6 | Network I/O | rx + tx bytes/sec, excluding `lo` | Throughput on real interfaces |
 
-## Why both are valuable together
+### Dashboard 3 — Fraud Detection — Project Overview
 
-A latency spike on Dashboard 1 is ambiguous on its own — *model issue or host issue?* Cross-checking against Dashboard 2's CPU/memory panels at the same timestamp answers that. Phase 14 will turn the most important threshold crossings into actual alerts.
+[docker/monitoring/grafana/provisioning/dashboards/fraud-detection-overview.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-overview.json)
+
+The "executive screen" for the demo. One page, everything that matters:
+API up/down, total predictions, fraud caught, real-world accuracy,
+inference p99, predictions/sec by class, fraud-ratio trend, host CPU /
+memory / disk, plus quick links to every other surface (Streamlit,
+MLflow, Airflow, Prometheus, AlertManager, sibling dashboards).
+
+### Dashboard 4 — Fraud Detection — API Endpoint Detail
+
+[docker/monitoring/grafana/provisioning/dashboards/fraud-detection-api-detail.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-api-detail.json)
+
+Per-endpoint deep dive. Request rate **by handler**, status-code
+distribution as stacked bars, 5xx and 4xx rates as red-thresholded stat
+tiles, average request and response sizes, p99 latency split per
+handler, prediction-latency **heatmap**, and a combined "predictions vs
+errors per minute" timeseries.
+
+### Dashboard 5 — Fraud Detection — System Resources Detail
+
+[docker/monitoring/grafana/provisioning/dashboards/fraud-detection-resources.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-resources.json)
+
+Goes deeper than Dashboard 2: CPU usage **by mode** (user/system/iowait/etc.)
+*and* per-CPU core utilisation; memory broken down into used / buffers /
+cached / free with stacking; swap; dirty/active-anon memory pressure;
+disk read/write throughput plus disk-busy %; **filesystem usage and
+inode usage** as bar gauges per mountpoint; per-interface network rx/tx
+plus errors/dropped; open file-descriptor saturation; context switches
+per second; and host uptime.
+
+### Dashboard 6 — Fraud Detection — Stack Health
+
+[docker/monitoring/grafana/provisioning/dashboards/fraud-detection-stack-health.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-stack-health.json)
+
+Monitors the **monitoring** itself. `up{}` per scrape target as
+green/red tiles, scrape duration and samples-scraped per job, API
+process resident + virtual memory, process CPU, open file descriptors
+(open vs max), Python GC collections per generation, API uptime, and
+API process network bytes.
+
+### Dashboard 7 — Fraud Detection — ML Ops & Feedback Loop
+
+[docker/monitoring/grafana/provisioning/dashboards/fraud-detection-ml-ops.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-ml-ops.json)
+
+The ML-specific narrative: predictions/min stacked by class, fraud
+ratio over time with thresholded bands, real-world accuracy with red
+zones, feedback received per minute by **actual label**, snapshot tiles
+(predictions, feedback, feedback/prediction ratio, fraud rate, accuracy,
+p99), cumulative predictions vs cumulative feedback, and an
+"operational links" footer with the exact CLIs to trigger retraining or
+promote a model.
+
+## Why all seven are valuable together
+
+A latency spike on the API dashboard is ambiguous on its own — *model
+issue, endpoint issue, host issue, or scrape issue?* The seven
+dashboards form an **incident-investigation funnel**:
+
+1. **Project Overview** — am I in trouble?
+2. **API Endpoint Detail** — which endpoint is sad?
+3. **System Resources Detail** — is the host the cause?
+4. **Stack Health** — is the API process itself unhealthy (FDs, GC, scrape failing)?
+5. **ML Ops & Feedback Loop** — is this a real model regression vs. infrastructure?
+
+Phase 14 turns the most important threshold crossings into actual
+AlertManager alerts.
 
 ## Volume mounts (no compose change needed)
 
@@ -84,6 +149,11 @@ done
 - [docker/monitoring/grafana/provisioning/dashboards/dashboards.yml](../docker/monitoring/grafana/provisioning/dashboards/dashboards.yml) — provider config
 - [.../fraud-detection-api.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-api.json) — 7-panel API dashboard
 - [.../fraud-detection-host.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-host.json) — 6-panel host dashboard
+- [.../fraud-detection-overview.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-overview.json) — 11-panel executive overview
+- [.../fraud-detection-api-detail.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-api-detail.json) — 10-panel per-endpoint deep dive
+- [.../fraud-detection-resources.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-resources.json) — 14-panel system resources detail (per-CPU, memory breakdown, disk I/O, FS bargauges, network errors, FDs, ctx switches)
+- [.../fraud-detection-stack-health.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-stack-health.json) — 10-panel scrape + API process monitor
+- [.../fraud-detection-ml-ops.json](../docker/monitoring/grafana/provisioning/dashboards/fraud-detection-ml-ops.json) — 12-panel feedback-loop dashboard
 - This document
 - Tag `v0.13.0-phase13` on `main`
 
