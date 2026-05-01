@@ -50,6 +50,7 @@ def _load_config(config_path: str = "configs/config.yaml") -> dict:
     with open(config_path, "r") as f:
         return yaml.safe_load(f) or {}
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
