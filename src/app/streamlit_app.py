@@ -320,7 +320,7 @@ elif page == "Pipeline Status":
             with open(dvc_yaml_path) as f:
                 yml = yaml.safe_load(f) or {}
             stage_names = list((yml.get("stages") or {}).keys())
-            locked_stages = (lock.get("stages") or {})
+            locked_stages = lock.get("stages") or {}
             rows = []
             for s in stage_names:
                 locked = s in locked_stages
@@ -372,15 +372,21 @@ elif page == "Pipeline Status":
                         {
                             "dag_id": dag_id,
                             "paused": d.get("is_paused"),
-                            "schedule": d.get("schedule_interval", {}).get("value")
-                            if isinstance(d.get("schedule_interval"), dict)
-                            else d.get("schedule_interval"),
+                            "schedule": (
+                                d.get("schedule_interval", {}).get("value")
+                                if isinstance(d.get("schedule_interval"), dict)
+                                else d.get("schedule_interval")
+                            ),
                             "last_state": last.get("state", "—"),
                             "last_run": last.get("execution_date", "—"),
                         }
                     )
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-                st.markdown(f"Open the [Airflow UI]({AIRFLOW_URL}) for full graph + logs.")
+                st.dataframe(
+                    pd.DataFrame(rows), use_container_width=True, hide_index=True
+                )
+                st.markdown(
+                    f"Open the [Airflow UI]({AIRFLOW_URL}) for full graph + logs."
+                )
         else:
             st.warning(f"Airflow returned HTTP {r.status_code} — is it running?")
     except Exception as exc:
@@ -406,7 +412,9 @@ elif page == "Pipeline Status":
         )
         if exp_lookup.status_code == 200:
             experiment_id = (
-                (exp_lookup.json() or {}).get("experiment", {}).get("experiment_id", "0")
+                (exp_lookup.json() or {})
+                .get("experiment", {})
+                .get("experiment_id", "0")
             )
         else:
             experiment_id = "0"
@@ -414,8 +422,11 @@ elif page == "Pipeline Status":
         # Latest 5 runs in the resolved experiment
         r = requests.post(
             f"{MLFLOW_URL}/api/2.0/mlflow/runs/search",
-            json={"experiment_ids": [experiment_id], "max_results": 5,
-                  "order_by": ["attributes.start_time DESC"]},
+            json={
+                "experiment_ids": [experiment_id],
+                "max_results": 5,
+                "order_by": ["attributes.start_time DESC"],
+            },
             timeout=HEALTH_TIMEOUT_S,
         )
         if r.status_code == 200:
@@ -439,15 +450,20 @@ elif page == "Pipeline Status":
                             "pr_auc": round(metrics_map.get("pr_auc", 0.0), 4),
                         }
                     )
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(rows), use_container_width=True, hide_index=True
+                )
             else:
                 st.info("No MLflow runs found yet.")
 
             # Registry: latest version per stage
             reg = requests.get(
                 f"{MLFLOW_URL}/api/2.0/mlflow/registered-models/get-latest-versions",
-                params={"name": _CFG.get("mlflow", {}).get(
-                    "registered_model_name", "fraud-detection-xgboost")},
+                params={
+                    "name": _CFG.get("mlflow", {}).get(
+                        "registered_model_name", "fraud-detection-xgboost"
+                    )
+                },
                 timeout=HEALTH_TIMEOUT_S,
             )
             if reg.status_code == 200:
@@ -469,7 +485,9 @@ elif page == "Pipeline Status":
                         use_container_width=True,
                         hide_index=True,
                     )
-            st.markdown(f"Open the [MLflow UI]({MLFLOW_URL}) for run details + artifacts.")
+            st.markdown(
+                f"Open the [MLflow UI]({MLFLOW_URL}) for run details + artifacts."
+            )
         else:
             st.warning(f"MLflow returned HTTP {r.status_code}.")
     except Exception as exc:
@@ -483,9 +501,7 @@ elif page == "Pipeline Status":
     # ── Prometheus scrape targets (proxy for "all components healthy") ─
     st.subheader("4. Prometheus — Scrape-Target Health")
     try:
-        r = requests.get(
-            f"{PROMETHEUS_URL}/api/v1/targets", timeout=HEALTH_TIMEOUT_S
-        )
+        r = requests.get(f"{PROMETHEUS_URL}/api/v1/targets", timeout=HEALTH_TIMEOUT_S)
         if r.status_code == 200:
             targets = (r.json().get("data") or {}).get("activeTargets", [])
             if targets:
